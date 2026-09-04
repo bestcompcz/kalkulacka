@@ -343,13 +343,13 @@ tr.unused td{background:#FEFCFB}
     <div class="chips" id="pFilter" style="margin:0"></div>
     <span id="pChybi" class="muted num" style="margin-left:auto;font-size:12.5px"></span>
   </div>
-  <div class="card"><table id="pTab"><thead><tr>
+  <div class="card"><div class="tbl"><table id="pTab"><thead><tr>
     <th style="width:15%">Název v kalkulačce</th><th style="width:15%">Název na e-shopu</th>
     <th style="width:13%">Parametr v Shoptetu</th>
     <th style="width:13%">Z (základ)</th><th style="width:13%">Na</th>
     <th style="width:7%">Marže</th><th style="width:8%">Výpočet</th><th style="width:8%">Pevná</th>
     <th style="width:10%">Platí</th><th style="width:3%"></th>
-  </tr></thead><tbody id="pBody"></tbody></table></div>
+  </tr></thead><tbody id="pBody"></tbody></table></div></div>
 </section>
 
 <section class="panel" id="p-prodej" hidden>
@@ -369,9 +369,9 @@ tr.unused td{background:#FEFCFB}
     <textarea id="pdCsv" rows="6" placeholder="Sem vlož obsah CSV (včetně řádku s hlavičkou)…"
       style="width:100%;margin-top:6px;font-family:var(--mono);font-size:12px;padding:10px;border:1px solid var(--line);border-radius:8px"></textarea>
   </details>
-  <div class="card" style="margin-top:12px"><table id="pdTab"><thead><tr>
+  <div class="card" style="margin-top:12px"><div class="tbl"><table id="pdTab"><thead><tr>
     <th style="width:110px">Objednávka</th><th style="width:96px">Kód</th><th>Sestava</th>
-    <th style="width:80px">Datum</th><th style="width:90px">Stav</th></tr></thead><tbody id="pdBody"></tbody></table></div>
+    <th style="width:80px">Datum</th><th style="width:90px">Stav</th></tr></thead><tbody id="pdBody"></tbody></table></div></div>
 </section>
 
 <section class="panel" id="p-nakup" hidden>
@@ -398,8 +398,8 @@ tr.unused td{background:#FEFCFB}
       <input type="checkbox" id="nkOtev" style="width:auto"> jen nedodané</label>
   </div>
   <datalist id="kompList"></datalist>
-  <div class="card"><table id="nkTab"><thead><tr>
-    <th style="width:106px">Datum</th><th style="width:21%">Komponenta</th><th>Přesný produkt</th>
+  <div class="card"><div class="tbl"><table id="nkTab"><thead><tr>
+    <th style="width:106px">Datum</th><th style="width:210px">Komponenta</th><th style="width:230px">Přesný produkt</th>
     <th style="width:84px">Dodavatel</th><th style="width:52px">Ks</th><th style="width:82px" title="Cena za kus bez DPH">Bez DPH</th><th style="width:84px" title="Cena za kus včetně DPH">S DPH</th>
     <th style="width:58px">Dodáno</th>
     <th style="width:58px" title="Kolik kusů už dodavatel vyfakturoval">Fakt.</th>
@@ -407,7 +407,7 @@ tr.unused td{background:#FEFCFB}
     <th style="width:46px" title="Zaplaceno">Zapl.</th>
     <th style="width:104px" title="Slíbený termín doručení">Doručení</th>
     <th style="width:40px" title="Storno — čekám na vrácení peněz">↩</th><th style="width:30px"></th>
-  </tr></thead><tbody id="nkBody"></tbody></table></div>
+  </tr></thead><tbody id="nkBody"></tbody></table></div></div>
 </section>
 
 <section class="panel" id="p-rekl" hidden>
@@ -1074,7 +1074,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=126;
+const VERZE=127;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1455,7 +1455,7 @@ function otevriModely(id){
   const chybi=L.find(x=>!x.popis);
   $("#mBody").innerHTML=`
     ${odv?`<p class="hint" style="margin:0 0 6px">Odvozeno z nákupů podle stavu skladu (${Number(k.ks)||0} ks). Aktualizuje se samo.</p>
-      <table style="margin-bottom:14px"><tbody>${odv}${chibiRow(chybi)}</tbody></table>`:
+      <div class="tbl"><table style="margin-bottom:14px"><tbody>${odv}${chibiRow(chybi)}</tbody></table></div>`:
       `<p class="hint" style="margin:0 0 10px">K téhle komponentě nemám v Nákupech žádný záznam, ze kterého by šly modely odvodit.</p>`}
     <p class="hint" style="margin:0 0 10px">Vlastní poznámka navíc — každý řádek zvlášť. Zobrazí se pod odvozeným seznamem.</p>
     <textarea id="modelyText" rows="4" placeholder="např. bílé moduly, CL36&#10;u zakázek raději Kingston"
@@ -1496,11 +1496,11 @@ function historieKomp(id){
       <path d="${body}" fill="none" stroke="var(--signal)" stroke-width="2" stroke-linejoin="round"/>
       ${n.map((x,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(Number(x.cena)).toFixed(1)}" r="3.5" fill="#fff" stroke="var(--signal)" stroke-width="2"><title>${esc(x.datum)} · ${Math.round(Number(x.cena))} Kč · ${x.dodano||0} ks · ${esc(x.dodavatel||"")}</title></circle>`).join("")}
     </svg>
-    <table style="margin-top:10px"><thead><tr><th>Datum</th><th>Dodavatel</th><th>Produkt</th><th class="r">Ks</th><th class="r">Cena/ks</th></tr></thead><tbody>
+    <div class="tbl"><table style="margin-top:10px"><thead><tr><th>Datum</th><th>Dodavatel</th><th>Produkt</th><th class="r">Ks</th><th class="r">Cena/ks</th></tr></thead><tbody>
     ${[...n].reverse().map(x=>`<tr><td class="num">${esc(x.datum||"")}</td><td>${esc(x.dodavatel||"")}</td>
       <td style="font-size:12px">${esc((x.popis||"").slice(0,42))}</td>
       <td class="r num">${x.dodano??""}</td><td class="r num">${kc(x.cena)}</td></tr>`).join("")}
-    </tbody></table>`;
+    </tbody></table></div>`;
   modalKomp=null; $("#modal").hidden=false;
 }
 const VAT=()=>1+(Number(D.nastaveni.vat)||21)/100;
