@@ -212,6 +212,38 @@ tr.unused td{background:#FEFCFB}
 #novaVerze{position:sticky;top:0;z-index:70;background:#1B8A57;color:#fff;
   padding:9px 14px;font-size:13px;display:flex;gap:12px;align-items:center}
 #novaVerze[hidden]{display:none}
+/* ================= mobil a úzké obrazovky =================
+   Tabulky se na úzkém displeji nesmí smršťovat — text by se lámal po písmenech.
+   Místo toho dostanou pevnou minimální šířku a posouvají se do stran. */
+.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:1100px){
+  .blocks{grid-template-columns:repeat(auto-fill,minmax(380px,1fr))}
+}
+@media(max-width:820px){
+  body{font-size:14px}
+  .blocks{grid-template-columns:1fr}          /* jeden sloupec, nic namáčknutého */
+  .block table{table-layout:auto;min-width:760px}
+  .tbl table{min-width:820px}
+  .block>header,.tbl{overflow-x:auto}
+  td,th{white-space:nowrap}                    /* konec lámání po písmenech */
+  td:first-child,th:first-child{white-space:normal;min-width:190px}
+  .modely-btn{white-space:normal}
+  .slots{grid-template-columns:1fr}
+  .slot{grid-template-columns:5px 78px 1fr 58px}
+  .sur{grid-template-columns:1fr}
+  .top{flex-wrap:wrap;gap:6px}
+  .tabs{flex-wrap:wrap}
+  .sestLista{position:static}                  /* ukotvení bere na mobilu půlku displeje */
+  .hlavicka{flex-wrap:wrap;gap:4px}
+  .hdetail{white-space:normal}
+  input,select,textarea{font-size:16px}        /* pod 16px iPhone při psaní přiblíží stránku */
+  .px{min-width:56px}
+}
+@media(max-width:520px){
+  .brand{font-size:14px}
+  .btn{padding:5px 9px}
+  td:first-child,th:first-child{min-width:160px}
+}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -440,15 +472,15 @@ tr.unused td{background:#FEFCFB}
   <div class="blocks">
     <div class="card block">
       <header><span class="rail" style="--k:var(--signal)"></span><h3>Marže sestav</h3></header>
-      <table><thead><tr><th>Cena s DPH do</th><th>Marže bez DPH</th><th></th></tr></thead>
-      <tbody id="bandBody"></tbody></table>
+      <div class="tbl"><table><thead><tr><th>Cena s DPH do</th><th>Marže bez DPH</th><th></th></tr></thead>
+      <tbody id="bandBody"></tbody></table></div>
       <div class="addrow"><button class="btn btn-sm" id="addBand">Přidat pásmo</button></div>
     </div>
     <div class="card block" style="grid-column:1/-1">
       <header><span class="rail" style="--k:var(--case)"></span><h3>Skříně a varianty</h3></header>
       <p class="hint" style="padding:8px 12px 0;margin:0">Hodnota je pozice skříně na společné škále. Příplatek v sestavě = rozdíl hodnot proti skříni, kterou má sestava vybranou.</p>
-      <table><thead><tr><th>Skříň</th><th>Hodnota na škále</th><th>V žebříčku</th><th>+RGB modul</th></tr></thead>
-      <tbody id="skrBody"></tbody></table>
+      <div class="tbl"><table><thead><tr><th>Skříň</th><th>Hodnota na škále</th><th>V žebříčku</th><th>+RGB modul</th></tr></thead>
+      <tbody id="skrBody"></tbody></table></div>
       <div class="addrow row" style="gap:14px">
         <label class="row" style="gap:6px">Příplatek navíc <input type="number" id="skExtra" class="px" style="width:80px"> Kč u desek
           <input type="text" id="skDesky" style="width:150px" placeholder="A520, B550"></label>
@@ -458,25 +490,25 @@ tr.unused td{background:#FEFCFB}
     <div class="card block">
       <header><span class="rail" style="--k:var(--signal)"></span><h3>Marže příplatků</h3></header>
       <p class="hint" style="padding:8px 12px 0;margin:0">Pásmo se určuje podle rozdílu nákupních cen bez DPH.</p>
-      <table><thead><tr><th>Rozdíl nákupu bez DPH do</th><th>Marže bez DPH</th><th></th></tr></thead>
-      <tbody id="bandPBody"></tbody></table>
+      <div class="tbl"><table><thead><tr><th>Rozdíl nákupu bez DPH do</th><th>Marže bez DPH</th><th></th></tr></thead>
+      <tbody id="bandPBody"></tbody></table></div>
       <div class="addrow"><button class="btn btn-sm" id="addBandP">Přidat pásmo</button></div>
     </div>
     <div class="card block" style="grid-column:1/-1">
       <header><span class="rail" style="--k:var(--psu)"></span><h3>Náklady na dopravu a platbu</h3></header>
       <p class="hint" style="padding:8px 12px 0;margin:0">Odečítá se od marže při vyhodnocování objednávek. Částky včetně DPH. Klíčové slovo se hledá v názvu dopravy nebo platby v objednávce.</p>
-      <table><thead><tr><th>Klíčové slovo v objednávce</th><th style="width:110px">Typ</th>
+      <div class="tbl"><table><thead><tr><th>Klíčové slovo v objednávce</th><th style="width:110px">Typ</th>
         <th style="width:90px">Hodnota</th><th>Poznámka</th><th style="width:36px"></th></tr></thead>
-      <tbody id="naklBody"></tbody></table>
+      <tbody id="naklBody"></tbody></table></div>
       <div class="addrow"><button class="btn btn-sm" id="addNakl">Přidat řádek</button></div>
     </div>
     <div class="card block">
       <header><span class="rail" style="--k:var(--misc)"></span><h3>Konstanty</h3></header>
-      <table><tbody>
+      <div class="tbl"><table><tbody>
         <tr><td>Sazba DPH</td><td class="r"><input type="number" id="cVat" step="1" class="px"></td><td class="muted">%</td></tr>
         <tr><td>Práce — běžná sestava</td><td class="r"><input type="number" id="cWork" step="10" class="px"></td><td class="muted">Kč</td></tr>
         <tr><td>Licence Windows</td><td class="r"><input type="number" id="cWin" step="10" class="px"></td><td class="muted">Kč</td></tr>
-      </tbody></table>
+      </tbody></table></div>
     </div>
   </div>
 </section>
@@ -705,11 +737,11 @@ function opravLevely(txt){
   lvlCache={zm,KAT};
   $("#mTitle").textContent="Oprava cenových levelů";
   $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Level se určuje podle ceny hlavní varianty. Ostatní kategorie zůstanou beze změny.</p>
-    <table><thead><tr><th>Produkt</th><th class="r">Cena</th><th>Z</th><th>Do</th></tr></thead><tbody>
+    <div class="tbl"><table><thead><tr><th>Produkt</th><th class="r">Cena</th><th>Z</th><th>Do</th></tr></thead><tbody>
     ${zm.map(z=>`<tr><td class="num">${esc(z.kod)}</td><td class="r num">${kc(z.p)}</td>
       <td style="font-size:11.5px">${esc(z.stary.split(">").pop().trim())}</td>
       <td style="font-size:11.5px;font-weight:600">${esc(z.novy.split(">").pop().trim())}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="lvlZrus">Zrušit</button>
       <button class="btn btn-sm btn-primary" id="lvlOk">Stáhnout import</button></div>`;
@@ -813,7 +845,7 @@ function renderKomp(){
     el.innerHTML=`<header><span class="rail" style="--k:${railFor(cat)}"></span>
       <h3>${esc(cat)}</h3><span class="count">${jenNep?vis.length+"/"+arr.length:arr.length}</span>
       <button class="icon-x" data-delcat="${esc(cat)}" title="Smazat kategorii">×</button></header>
-      <table><thead><tr><th>Komponenta</th><th>Skladová</th><th>Reprod.</th><th>Aktivní</th><th>Užití</th></tr></thead>
+      <div class="tbl"><table><thead><tr><th>Komponenta</th><th>Skladová</th><th>Reprod.</th><th>Aktivní</th><th>Užití</th></tr></thead>
       <tbody>${vis.map(k=>`<tr class="${U[k.id]?"":"unused"}">
         <td><div class="row" style="gap:5px;align-items:center">
               <input type="text" class="${U[k.id]?"used":""}" value="${esc(k.nazev)}" data-f="nazev" data-id="${k.id}" style="flex:1;min-width:0">
@@ -857,7 +889,7 @@ function renderKomp(){
         <td class="r"><span class="use ${U[k.id]?"":"zero"}" data-kde="${k.id}" title="${U[k.id]?"použito v "+U[k.id]+" sestavách":"nepoužito"}">${U[k.id]||0}</span>
             <button class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny">📈</button>
             <button class="icon-x" data-del="${k.id}" title="Smazat">×</button></td>
-      </tr>`).join("")}</tbody></table>
+      </tr>`).join("")}</tbody></table></div>
       <div class="addrow"><button class="btn btn-sm" data-addk="${esc(cat)}">+ komponenta</button></div>`;
     w.appendChild(el);
   }
@@ -999,14 +1031,14 @@ function buildCard(s){
              <span style="${s.vyp[p.id]?"opacity:.45;text-decoration:line-through":""}">${esc(p.nazev)}</span>
              <span class="num muted" style="margin-left:auto">${kc(surPlati(p)||0)}</span></div>`).join("")}</div>`).join("")}</div></div>`})()}
       ${(()=>{const V=varianty(s);if(!V.length)return"";
-        return `<div class="vars"><details><summary style="cursor:pointer;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:700">Varianty skříně (${V.length})</summary><table><thead><tr><th>Varianta skříně</th><th>Příplatek</th><th>Nákup</th><th>Cena</th><th>Marže</th></tr></thead><tbody>
+        return `<div class="vars"><details><summary style="cursor:pointer;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:700">Varianty skříně (${V.length})</summary><div class="tbl"><table><thead><tr><th>Varianta skříně</th><th>Příplatek</th><th>Nákup</th><th>Cena</th><th>Marže</th></tr></thead><tbody>
         ${V.map(v=>`<tr${v.jeZaklad?' class="baserow"':''}>
           <td>${esc(v.k.nazev)}${v.extraOk?' <span class="tag">+RGB modul</span>':''}${v.jeZaklad?' <span class="tag base">v sestavě</span>':''}</td>
           <td class="r num">${v.pr?(v.pr>0?"+":"")+kc(v.pr):"—"}</td>
           <td class="r num muted">${kc(v.nak)}</td>
           <td class="r num" style="font-weight:700">${kc(v.cenaProdej)}</td>
           <td class="r num" style="color:${v.pct<8?"var(--bad)":v.pct<11?"var(--warn)":"var(--ok)"}">${v.pct.toFixed(1)} %</td>
-        </tr>`).join("")}</tbody></table></details></div>`})()}
+        </tr>`).join("")}</tbody></table></div></details></div>`})()}
       </div>`;
 }
 /* Držení má smysl jen tak dlouho, dokud se výpočet od držené ceny liší.
@@ -1026,7 +1058,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=123;
+const VERZE=124;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1342,7 +1374,7 @@ function specifikace(sid){
     return t}).join("\n");
   $("#mBody").innerHTML=`
     <p class="hint" style="margin:0 0 10px">Kódy variant: <strong>${esc(s.kod||"—")}</strong>. Konkrétní modely se berou z nákupů podle aktuálního stavu skladu.</p>
-    <table><thead><tr><th style="width:120px">Kategorie</th><th>Komponenta</th><th class="r" style="width:56px">Skladem</th></tr></thead><tbody>
+    <div class="tbl"><table><thead><tr><th style="width:120px">Kategorie</th><th>Komponenta</th><th class="r" style="width:56px">Skladem</th></tr></thead><tbody>
     ${rad.map(r=>`<tr${r.ks?"":' style="background:#FDECEA"'}>
       <td class="muted">${esc(r.slot)}</td>
       <td><strong>${esc(r.nazev)}</strong>
@@ -1355,7 +1387,7 @@ function specifikace(sid){
             ${a.modely.length?`<div style="color:var(--ink-3);font-size:11px;padding-left:10px">${a.modely.map(esc).join("<br>")}</div>`:""}</div>`).join("")}
         </div>`:""}</td>
       <td class="r num"${r.ks?"":' style="color:var(--bad)"'}>${r.ks}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="specKopie">Kopírovat jako text</button>
       <button class="btn btn-sm btn-primary" id="specZavri">Zavřít</button></div>`;
@@ -1760,12 +1792,12 @@ function zobrazOdpis(){
     .sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
   $("#mTitle").textContent="Odepsat ze skladu";
   $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Ceny se nemění, mění se jen množství.</p>
-    <table><thead><tr><th>Komponenta</th><th class="r">Skladem</th><th class="r">Odečíst</th><th class="r">Zůstane</th></tr></thead><tbody>
+    <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Skladem</th><th class="r">Odečíst</th><th class="r">Zůstane</th></tr></thead><tbody>
     ${L.map(x=>{const ks=Number(x.k.ks)||0,zb=ks-x.q;return `<tr${zb<0?' style="background:#FDECEA"':''}>
       <td>${esc(x.k.nazev)}</td><td class="r num">${ks}</td>
       <td class="r num" style="color:var(--bad)">−${x.q}</td>
       <td class="r num" style="font-weight:600${zb<0?";color:var(--bad)":""}">${zb}${zb<0?" ⚠":""}</td></tr>`}).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="odpZrus">Zrušit</button>
       <button class="btn btn-sm btn-primary" id="odpOk">Odepsat ze skladu</button></div>`;
@@ -1818,7 +1850,7 @@ function zobrazZaskladneni(){
   $("#mTitle").textContent="Přidat do skladu";
   $("#mBody").innerHTML=`
     <p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Přidá se jen to, co ještě ve skladu není. Ceny se tímto nemění.</p>
-    <table><thead><tr><th>Komponenta</th><th>Nákupy</th>
+    <div class="tbl"><table><thead><tr><th>Komponenta</th><th>Nákupy</th>
       <th class="r">Teď</th><th class="r">Přidat</th><th class="r">Nově</th></tr></thead><tbody>
     ${L.map(x=>`<tr>
       <td><strong>${esc(x.k.nazev)}</strong><div class="muted" style="font-size:11px">${esc(x.cat)}</div></td>
@@ -1826,7 +1858,7 @@ function zobrazZaskladneni(){
       <td class="r num">${Number(x.k.ks)||0}</td>
       <td class="r num" style="color:var(--ok);font-weight:600">+${x.pridat}</td>
       <td class="r num" style="font-weight:600">${(Number(x.k.ks)||0)+x.pridat}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="zaskZrus">Zrušit</button>
       <button class="btn btn-sm btn-primary" id="zaskOk">Přidat do skladu</button></div>`;
@@ -1855,7 +1887,7 @@ function prepocetZeNakupu(){
   $("#mTitle").textContent="Přepočítat skladové ceny";
   $("#mBody").innerHTML=`
     <p class="hint" style="margin:0 0 10px">Skladová cena = vážený průměr posledních dodaných kusů podle množství na skladě. Reprodukční cena se nemění.</p>
-    <table><thead><tr><th>Komponenta</th><th class="r">Ks</th><th class="r">Stará</th><th class="r">Nová</th><th class="r">Rozdíl</th><th>Z čeho</th></tr></thead><tbody>
+    <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Ks</th><th class="r">Stará</th><th class="r">Nová</th><th class="r">Rozdíl</th><th>Z čeho</th></tr></thead><tbody>
     ${zmeny.map(z=>`<tr${z.chybi?' style="background:#FFFBF5"':''}>
       <td><strong>${esc(z.k.nazev)}</strong>${z.chybi?`<div style="font-size:11px;color:var(--signal)">nákupy nepokrývají ${z.chybi} ks</div>`:""}</td>
       <td class="r num">${Number(z.k.ks)||0}</td>
@@ -1863,7 +1895,7 @@ function prepocetZeNakupu(){
       <td class="r num" style="font-weight:600">${kc(z.prum)}</td>
       <td class="r num" style="color:${z.prum>Number(z.k.sklad)?"var(--bad)":"var(--ok)"}">${z.prum>Number(z.k.sklad)?"+":""}${Math.round(z.prum-Number(z.k.sklad))}</td>
       <td style="font-size:11px;color:var(--ink-2);white-space:pre-line">${esc(z.modely)}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="prepZrus">Zrušit</button>
       <button class="btn btn-sm btn-primary" id="prepOk">Přepsat ceny</button></div>`;
@@ -1919,7 +1951,7 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
   const nalezeno=pol.filter(x=>x.nakup).length;
   $("#mTitle").textContent=`Faktura ${cislo||""} — ${nalezeno} z ${pol.length} napárováno`;
   $("#mBody").innerHTML=`
-    <table><thead><tr><th>Z faktury</th><th style="width:26%">Napárováno na nákup</th>
+    <div class="tbl"><table><thead><tr><th>Z faktury</th><th style="width:26%">Napárováno na nákup</th>
       <th class="r" style="width:64px">Obj.</th><th class="r" style="width:64px">Fakt.</th>
       <th class="r" style="width:96px">Cena obj.</th><th class="r" style="width:96px">Cena fakt.</th>
       <th class="r" style="width:78px">Rozdíl</th></tr></thead><tbody>
@@ -1935,7 +1967,7 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
       <td class="r"><input type="number" class="px" value="${x.cena??""}" data-fi="${i}" data-ff="cena" ${n?"":"disabled"}></td>
       <td class="r num" style="color:${Math.abs(rozdil)<0.01?"var(--ink-3)":rozdil<0?"var(--ok)":"var(--bad)"}">
         ${n?(rozdil>0?"+":"")+Math.round(rozdil*100)/100:"—"}</td></tr>`}).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <p class="hint" style="margin:10px 0 0">Cena z faktury přepíše cenu v nákupu. Když faktura pokrývá
       jen část kusů a cena se liší, nákup se rozdělí na vyfakturovanou část a zbytek.</p>
     <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
@@ -2212,7 +2244,7 @@ function zobrazKosikNahled(pol){
       <input type="text" id="kosikDodavatel" value="${esc(pol[0]&&pol[0].dodavatel||"")}"
         placeholder="např. alza" style="max-width:170px;${stylDodavatele(pol[0]&&pol[0].dodavatel)}">
     </div>
-    <table><thead><tr><th>Popis z e-shopu</th><th style="width:96px">Datum</th><th style="width:150px">Komponenta</th>
+    <div class="tbl"><table><thead><tr><th>Popis z e-shopu</th><th style="width:96px">Datum</th><th style="width:150px">Komponenta</th>
       <th class="r" style="width:52px">Ks</th>
       <th class="r" style="width:104px">Cena/ks s DPH</th><th class="r" style="width:96px">Celkem s DPH</th></tr></thead><tbody>
     ${pol.map((x,i)=>`<tr style="background:${x.komp?"#DDF3E6":"#FDF4D4"};box-shadow:inset 4px 0 0 ${x.komp?"#1B8A57":"#E0B740"}">
@@ -2224,7 +2256,7 @@ function zobrazKosikNahled(pol){
       <td class="r"><input type="number" class="px" value="${(kosikBezDph?naDph(x.cena):x.cena)??""}" data-ki="${i}" data-kf="cena" placeholder="—">
         ${kosikBezDph&&x.cena!=null?`<div style="font-size:10px;color:var(--ink-3);margin-top:2px">z ${kc(x.cena)} bez DPH</div>`:""}</td>
       <td class="r num">${kc((x.ks||0)*((kosikBezDph?naDph(x.cena):x.cena)||0))}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     ${(()=>{const M=pol.meta; if(!M||(!M.zaklad&&!M.celkem))return "";
       const polozky=pol.reduce((a,x)=>a+(x.ks||0)*(x.cena||0),0);
       const soucet=Math.round((polozky+M.poplatky)*100)/100;
@@ -2385,9 +2417,9 @@ function zobrazVse(){
     $("#mTitle").textContent="Přepočet zastaven — nulová nákupní cena";
     $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">
       Tyhle komponenty by vyšly na 0 Kč. Doplň jim nákup s cenou, nebo oprav cenu u existujícího nákupu. Nic se nezměnilo.</p>
-      <table><thead><tr><th>Komponenta</th><th class="r">Ks</th></tr></thead><tbody>
+      <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Ks</th></tr></thead><tbody>
       ${A.nula.map(k=>`<tr><td><strong>${esc(k.nazev)}</strong></td><td class="r num">${Number(k.ks)||0}</td></tr>`).join("")}
-      </tbody></table>
+      </tbody></table></div>
       <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
         <button class="btn btn-sm btn-primary" id="vseZrus">Zavřít</button></div>`;
     modalKomp=null; $("#modal").hidden=false; return;
@@ -2399,30 +2431,30 @@ function zobrazVse(){
   $("#mBody").innerHTML=`
   <div style="margin-bottom:16px">
     <h3 style="margin:0 0 6px;font-size:13px">1 · Naskladnění${A.nask.length?"":" — nic nečeká"}</h3>
-    ${A.nask.length?`<table><thead><tr><th>Komponenta</th><th>Nákupy</th>
+    ${A.nask.length?`<div class="tbl"><table><thead><tr><th>Komponenta</th><th>Nákupy</th>
       <th class="r">Teď</th><th class="r">Přidat</th><th class="r">Nově</th></tr></thead><tbody>
       ${A.nask.map(x=>`<tr><td><strong>${esc(x.k.nazev)}</strong><div class="muted" style="font-size:11px">${esc(x.cat)}</div></td>
         <td style="font-size:11.5px;color:var(--ink-2)">${x.rad.map(n=>`${(Number(n.dodano)||0)-(Number(n.zaskl)||0)}× ${esc(n.datum||"")} ${esc((n.popis||"").slice(0,30))} (${Math.round(Number(n.cena)||0)})`).join("<br>")}</td>
         <td class="r num">${Number(x.k.ks)||0}</td>
         <td class="r num" style="color:var(--ok);font-weight:600">+${x.pridat}</td>
         <td class="r num" style="font-weight:600">${(Number(x.k.ks)||0)+x.pridat}</td></tr>`).join("")}
-      </tbody></table>`:""}
+      </tbody></table></div>`:""}
   </div>
   <div style="margin-bottom:16px">
     <h3 style="margin:0 0 6px;font-size:13px">2 · Skladové ceny${A.ceny.length?" — "+A.ceny.filter(z=>z.prum!==z.stara).length+" cen, "+A.ceny.filter(z=>z.prum===z.stara).length+" jen popis":" — beze změny"}</h3>
     ${A.ceny.length?`<p class="hint" style="margin:0 0 8px">Reprodukční cena se nemění. Řádky s ← dodávka jsou z právě naskladněného zboží, ostatní se rovnají až teď. Šedé řádky mění jen popis modelů, ne cenu.</p>
-      <table><thead><tr><th>Komponenta</th><th class="r">Ks</th><th class="r">Stará</th><th class="r">Nová</th><th class="r">Rozdíl</th></tr></thead><tbody>
+      <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Ks</th><th class="r">Stará</th><th class="r">Nová</th><th class="r">Rozdíl</th></tr></thead><tbody>
       ${A.ceny.map(z=>`<tr${z.prum===z.stara?' style="opacity:.55"':(z.chybi?' style="background:#FFFBF5"':'')}>
         <td><strong>${esc(z.k.nazev)}</strong>${z.zDodavky?' <span style="color:var(--ok);font-size:11px">← dodávka</span>':""}${z.chybi?`<div style="font-size:11px;color:var(--signal)">nákupy nepokrývají ${z.chybi} ks</div>`:""}</td>
         <td class="r num">${z.ksPo}${z.zDodavky?'<div style="font-size:10px;color:var(--ink-3)">bylo '+(Number(z.k.ks)||0)+'</div>':""}</td><td class="r num">${kc(z.stara)}</td>
         <td class="r num" style="font-weight:600">${kc(z.prum)}</td>
         <td class="r num" style="color:${z.prum>z.stara?"var(--bad)":"var(--ok)"}">${z.prum>z.stara?"+":""}${Math.round(z.prum-z.stara)}</td></tr>`).join("")}
-      </tbody></table>`:""}
+      </tbody></table></div>`:""}
   </div>
   <div style="margin-bottom:4px">
     <h3 style="margin:0 0 6px;font-size:13px">3 · Ceny sestav${A.sest.length?" — "+A.sest.length:" — beze změny"}</h3>
     ${A.sest.length?`<p class="hint" style="margin:0 0 8px">Zaškrtnuté ceny půjdou do CSV pro Shoptet. Odškrtnutá sestava si drží cenu, kterou má na e-shopu, a příště přijde odškrtnutá s poznámkou.</p>
-      <table><thead><tr><th style="width:26px"></th><th>Sestava</th><th>Varianty</th><th>Proč</th></tr></thead><tbody>
+      <div class="tbl"><table><thead><tr><th style="width:26px"></th><th>Sestava</th><th>Varianty</th><th>Proč</th></tr></thead><tbody>
       ${A.sest.map((g,i)=>`<tr${g.lvlZmena?' style="background:#FFFBF5"':''}>
         <td><input type="checkbox" class="vseChk" data-i="${i}" ${g.drzena==null?"checked":""}></td>
         <td><strong>${esc(g.s.nazev)}</strong>
@@ -2430,14 +2462,14 @@ function zobrazVse(){
             ${g.lvlZmena?`<div style="font-size:11px;color:var(--bad);font-weight:600">mění se cenový level → ${esc(g.lvlZmena[1].split(">").pop().trim())}, kategorie posílej zvlášť</div>`:""}</td>
         <td style="font-size:11.5px">${g.radky.map(r=>`<div class="num">${esc(r.kod)} &nbsp; ${sipka(r.pred,r.po)}</div>`).join("")}</td>
         <td style="font-size:11px;color:var(--ink-2)">${g.duvod.map(esc).join("<br>")||"—"}</td></tr>`).join("")}
-      </tbody></table>`:""}
+      </tbody></table></div>`:""}
   </div>
   <div style="margin-top:16px">
     <h3 style="margin:0 0 6px;font-size:13px">4 · Ceny příplatků${A.pripl.length?" — "+A.pripl.length+" se mění":" — beze změny"}</h3>
     ${A.pripl.length?`<p class="hint" style="margin:0 0 8px;color:var(--bad);font-weight:600">
       Po potvrzení stáhni <em>Stáhnout příplatky ↓ pro Shoptet</em> v hlavičce Sestav a importuj je.
       Ceny sestav se přitom hnout nemusely.</p>
-      <table><thead><tr><th>Příplatek</th><th>Parametr</th><th class="r">Sestav</th>
+      <div class="tbl"><table><thead><tr><th>Příplatek</th><th>Parametr</th><th class="r">Sestav</th>
         <th class="r">Teď</th><th class="r">Nově</th><th class="r">Rozdíl</th><th>Proč</th></tr></thead><tbody>
       ${A.pripl.map(x=>`<tr style="background:#FFF8E1">
         <td><strong>${esc(x.p.eshop||x.p.nazev)}</strong></td>
@@ -2447,7 +2479,7 @@ function zobrazVse(){
         <td class="r num" style="font-weight:600">${x.po==null?"—":kc(x.po)}</td>
         <td class="r num" style="color:${x.po>x.pred?"var(--bad)":"var(--ok)"}">${x.po>x.pred?"+":""}${Math.round((x.po||0)-(x.pred||0))}</td>
         <td style="font-size:11px;color:var(--ink-2)">${x.duvod.map(esc).join("<br>")||"—"}</td></tr>`).join("")}
-      </tbody></table>`
+      </tbody></table></div>`
       :`<p class="hint" style="margin:0">Žádný příplatek nemění cenu, importovat je nemusíš.</p>`}
   </div>
   <details style="margin-top:14px;border:1px solid var(--line);border-radius:8px;padding:8px 11px;background:#FAFBFC">
@@ -3014,10 +3046,10 @@ function renderSklad(){
     html+=`<div class="card block" style="margin-bottom:12px">
       <header><span class="rail" style="--k:${railFor(cat)}"></span><h3>${esc(cat)}</h3>
         <span class="count">${kc(hodKat)}</span></header>
-      <table><thead><tr><th>Komponenta</th><th style="width:70px">Ks</th><th style="width:70px" title="Dochází — čas objednat">Min.</th><th style="width:70px" title="Kritické — objednat hned">Krit.</th><th style="width:44px" title="Neomezené množství">∞</th>
+      <div class="tbl"><table><thead><tr><th>Komponenta</th><th style="width:70px">Ks</th><th style="width:70px" title="Dochází — čas objednat">Min.</th><th style="width:70px" title="Kritické — objednat hned">Krit.</th><th style="width:44px" title="Neomezené množství">∞</th>
         <th style="width:92px">Skladová</th><th style="width:92px">Reprod.</th>
         <th style="width:88px">Použitá</th><th style="width:104px">Hodnota</th><th style="width:78px"></th>
-      </tr></thead><tbody>${radky}</tbody></table></div>`;
+      </tr></thead><tbody>${radky}</tbody></table></div></div>`;
   }
   $("#skBlocks").innerHTML=html||`<div class="card" style="padding:26px;text-align:center;color:var(--ink-3)">${jenDoch?"Nic nedochází — všechny položky jsou nad minimem.":"Zatím nic. Zaškrtni volbu výše a doplň množství."}</div>`;
   $("#skladSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Hodnota skladu s DPH</div><div class="price">${kc(hod)}</div></div>
