@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BestComp — kalkulačka cen</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <style>
 :root{
   --ink:#16202B; --ink-2:#4A5765; --ink-3:#8A96A5;
@@ -1021,7 +1023,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=121;
+const VERZE=122;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3494,7 +3496,10 @@ document.addEventListener("click",e=>{
     if(drzene.length)alert("Do exportu nešly sestavy s drženou cenou:\n\n"+drzene.join("\n")
       +"\n\nDržení zrušíš tlačítkem na kartě sestavy.");
   }
-  if(t.id==="novaVerzeObnov"){location.reload();return}
+  if(t.id==="novaVerzeObnov"){
+    /* location.reload() umí načíst z mezipaměti a stará verze by tam zůstala.
+       Otazník s časem donutí prohlížeč stáhnout soubor znovu ze serveru. */
+    location.replace(location.pathname+"?v="+Date.now());return}
   if(t.id==="novaVerzeSkryj"){const e=$("#novaVerze");if(e)e.hidden=true;return}
   if(t.id==="cloudNacti"){cloudNacti(true);return}
   if(t.id==="cloudUloz"){cloudUloz();return}
@@ -3581,6 +3586,7 @@ D=restore()||fresh();
 if(!D.priplatky)D.priplatky=[];
 renderAll();
 /* kontrola nové verze při startu a pak jednou za deset minut */
+{const v=$("#verzeApp"); if(v)v.textContent="v"+VERZE;}
 zkontrolujVerzi();
 setInterval(zkontrolujVerzi,600000);
 
