@@ -211,8 +211,15 @@ tr.unused td{background:#FEFCFB}
 </head>
 <body>
 
+<div id="novaVerze" hidden style="position:sticky;top:0;z-index:70;background:#1B8A57;color:#fff;
+  padding:9px 14px;font-size:13px;display:flex;gap:12px;align-items:center">
+  <strong>Je k dispozici novější verze kalkulačky.</strong>
+  <span id="novaVerzeText" style="opacity:.85"></span>
+  <button class="btn btn-sm" id="novaVerzeObnov" style="margin-left:auto;background:#fff;color:#12181F;font-weight:700">Obnovit</button>
+  <button class="btn btn-sm" id="novaVerzeSkryj" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.5)">Později</button>
+</div>
 <div class="top">
-  <div class="brand">Best<em>Comp</em> · kalkulačka</div>
+  <div class="brand">Best<em>Comp</em> · kalkulačka<span id="verzeApp" style="font-size:11px;opacity:.5;margin-left:7px;font-weight:500"></span></div>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-p="p-komp">Komponenty</button>
     <button class="tab" role="tab" aria-selected="false" data-p="p-sest">Sestavy</button>
@@ -415,6 +422,8 @@ tr.unused td{background:#FEFCFB}
           <input type="text" id="cloudPath" placeholder="data.json" style="width:150px"></div>
         <div><div class="muted" style="font-size:11.5px">Token tohoto zařízení</div>
           <input type="password" id="cloudToken" placeholder="github_pat_…" style="width:230px"></div>
+        <div><div class="muted" style="font-size:11.5px">Název zařízení</div>
+          <input type="text" id="cloudZarizeni" placeholder="hlavní PC / mobil / sklad" style="width:170px"></div>
         <button class="btn btn-sm" id="cloudZapomen">Zapomenout token</button>
       </div>
       <p class="hint" style="margin:10px 0 0">Token zůstává jen v tomhle prohlížeči, do dat se neukládá —
@@ -534,6 +543,7 @@ const MAPA_DEF={"CPU":"Výměna procesoru","RAM":"Rozšířit pamět RAM","SSD":
 function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.bezDph))d.bezDph=["atc","atcomp","asbis","100mega"];   // uvádějí ceny bez DPH
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
+  if(d.cloud.zarizeni===undefined)d.cloud.zarizeni="";
   if(!Array.isArray(d.reklamace))d.reklamace=[];
   if(!Array.isArray(d.nabidky))d.nabidky=[];
   for(const n of d.nabidky){ if(n.marze===undefined)n.marze=6000; if(!Array.isArray(n.radky))n.radky=[];
@@ -1009,9 +1019,15 @@ function uklidDrzeni(){
 /* ======== synchronizace přes GitHub ========
    Data leží v privátním repozitáři jako jeden soubor. Zápis chrání otisk verze:
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
+/* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
+   že data uložila novější, a nepřepsala je zastaralým formátem. */
+const VERZE=121;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
+const ZARIZENI_KEY="bestcomp-zarizeni";
 const ghToken=()=>{try{return localStorage.getItem(GH_TOKEN_KEY)||""}catch(e){return ""}};
+const zarizeni=()=>{try{return localStorage.getItem(ZARIZENI_KEY)||"neznámé zařízení"}catch(e){return "neznámé"}};
+const zarizeniNastav=v=>{try{v?localStorage.setItem(ZARIZENI_KEY,v):localStorage.removeItem(ZARIZENI_KEY)}catch(e){}};
 const ghNastav=t=>{try{t?localStorage.setItem(GH_TOKEN_KEY,t):localStorage.removeItem(GH_TOKEN_KEY)}catch(e){}};
 const cloudOk=()=>!!(D.cloud&&D.cloud.repo&&ghToken());
 /* base64 pro text s diakritikou — btoa samo o sobě na češtinu nestačí */
@@ -1051,6 +1067,10 @@ async function cloudNacti(potvrdit){
     if(!r.ok){toast(cloudChyba(r,await r.text()));return}
     const j=await r.json();
     const nova=JSON.parse(zBase64(j.content));
+    if(Number(nova.verzeApp||0)>VERZE&&!confirm(
+      `Data v cloudu uložila novější kalkulačka (v${nova.verzeApp}), tahle je v${VERZE}.\n\n`
+      +`Nejspíš máš v prohlížeči starou verzi — obnov stránku přes Ctrl+F5.\n\n`
+      +`Načíst i tak? Uložením bys pak mohl data poškodit.`))return;
     if(potvrdit&&cloudZmena&&!confirm("Máš tu neuložené změny. Načtením z cloudu o ně přijdeš.\n\nPokračovat?"))return;
     const cloudNast=D.cloud;
     D=oprav(nova); D.cloud=cloudNast;      // nastavení spojení zůstává zařízení
@@ -1060,13 +1080,41 @@ async function cloudNacti(potvrdit){
   }catch(e){toast("Načtení selhalo: "+e.message)}
   finally{cloudBezi=false; renderCloud()}
 }
+const pocty=d=>({nákupů:(d.nakupy||[]).length,sestav:(d.sestavy||[]).length,
+  komponent:Object.values(d.komponenty||{}).reduce((a,x)=>a+x.length,0),
+  odpisů:(d.odpisy||[]).length,příplatků:(d.priplatky||[]).length,nabídek:(d.nabidky||[]).length});
+const popisDat=d=>Object.entries(pocty(d)).map(([k,v])=>k+" "+v).join(", ");
 async function cloudUloz(){
   if(!cloudOk()){toast("Nejdřív vyplň repozitář a token v Nastavení");return}
   if(cloudBezi)return; cloudBezi=true; renderCloud();
   try{
-    const telo={message:"kalkulačka "+new Date().toLocaleString("cs-CZ"),
+    if(Number(D.verzeApp||0)>VERZE&&!confirm(
+      `Tahle data uložila novější kalkulačka (v${D.verzeApp}), ty jedeš na v${VERZE}.\n\n`
+      +`Uložením je můžeš poškodit. Pokračovat?`))return;
+    /* Než něco přepíšeme, podíváme se, co v cloudu leží. Když se to od našeho
+       posledního načtení liší, ukážeme obojí vedle sebe a necháme rozhodnout. */
+    const g=await ghFetch(ghUrl());
+    let vzdalenySha=null;
+    if(g.ok){
+      const gj=await g.json();
+      vzdalenySha=gj.sha;
+      if(cloudSha&&gj.sha!==cloudSha){
+        let vzdalena=null;
+        try{vzdalena=JSON.parse(zBase64(gj.content))}catch(e){}
+        const kdo=vzdalena&&vzdalena.ulozenoKym?vzdalena.ulozenoKym:"jiné zařízení";
+        const kdy=vzdalena&&vzdalena.ulozenoKdy?new Date(vzdalena.ulozenoKdy).toLocaleString("cs-CZ"):"neznámo kdy";
+        if(!confirm(
+          `V cloudu je novější uložení, než jaké máš načtené.\n\n`
+          +`V CLOUDU  ${kdo}, ${kdy}\n   ${vzdalena?popisDat(vzdalena):"nepodařilo se přečíst"}\n\n`
+          +`TADY  ${zarizeni()}, načteno ${cloudKdy?new Date(cloudKdy).toLocaleString("cs-CZ"):"neznámo"}\n   ${popisDat(D)}\n\n`
+          +`Uložením přepíšeš to v cloudu. Doporučuju zrušit, dát Načíst z cloudu a práci zopakovat.\n\n`
+          +`Opravdu přepsat?`))return;
+      }
+    }
+    D.verzeApp=VERZE; D.ulozenoKdy=new Date().toISOString(); D.ulozenoKym=zarizeni();
+    const telo={message:"kalkulačka v"+VERZE+" · "+zarizeni()+" · "+new Date().toLocaleString("cs-CZ"),
       content:doBase64(JSON.stringify(D))};
-    if(cloudSha)telo.sha=cloudSha;
+    if(vzdalenySha||cloudSha)telo.sha=vzdalenySha||cloudSha;
     let r=await ghFetch(ghUrl(),{method:"PUT",body:JSON.stringify(telo)});
     if(!r.ok){
       const z=cloudChyba(r,await r.text());
@@ -1082,12 +1130,34 @@ async function cloudUloz(){
   }catch(e){toast("Uložení selhalo: "+e.message)}
   finally{cloudBezi=false; renderCloud()}
 }
+/* Když je kalkulačka na webu, čas od času se podívá, jestli na serveru neleží
+   novější soubor. Řeší to případ, kdy prohlížeč drží starou verzi v paměti. */
+async function zkontrolujVerzi(){
+  if(!/^https?:/.test(location.protocol))return;
+  try{
+    const r=await fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"});
+    if(!r.ok)return;
+    const t=await r.text();
+    const m=t.match(/const\s+VERZE\s*=\s*(\d+)/);
+    if(!m)return;
+    const nova=Number(m[1]);
+    if(nova>VERZE){
+      const el=$("#novaVerze"); if(!el)return;
+      const txt=$("#novaVerzeText"); if(txt)txt.textContent=`máš v${VERZE}, na serveru je v${nova}`;
+      el.hidden=false;
+    }
+  }catch(e){}
+}
 function renderCloud(){
+  const v=$("#verzeApp");
+  if(v)v.textContent="v"+VERZE+(Number(D.verzeApp||0)>VERZE?" · data jsou z v"+D.verzeApp:"");
   const el=$("#cloudStav"); if(!el)return;
   const rp=$("#cloudRepo"), pt=$("#cloudPath"), tk=$("#cloudToken");
   if(rp&&document.activeElement!==rp)rp.value=(D.cloud&&D.cloud.repo)||"";
   if(pt&&document.activeElement!==pt)pt.value=(D.cloud&&D.cloud.path)||"data.json";
   if(tk&&document.activeElement!==tk)tk.value=ghToken();
+  const zr=$("#cloudZarizeni");
+  if(zr&&document.activeElement!==zr)zr.value=(()=>{try{return localStorage.getItem(ZARIZENI_KEY)||""}catch(e){return ""}})();
   const c=D.cloud||{};
   const stav=!c.repo?["není nastavené","var(--ink-3)"]
     :!ghToken()?["chybí token","var(--bad)"]
@@ -1099,6 +1169,8 @@ function renderCloud(){
       <div style="font-weight:700;color:${stav[1]}">${stav[0]}</div></div>
     <div><div class="muted" style="font-size:11.5px">Poslední synchronizace</div>
       <div style="font-size:13px">${cloudKdy?new Date(cloudKdy).toLocaleString("cs-CZ"):"—"}</div></div>
+    <div><div class="muted" style="font-size:11.5px">Data naposled uložilo</div>
+      <div style="font-size:13px">${D.ulozenoKym?esc(D.ulozenoKym)+(D.ulozenoKdy?" · "+new Date(D.ulozenoKdy).toLocaleString("cs-CZ"):""):"—"}</div></div>
     <div style="margin-left:auto" class="row">
       <button class="btn btn-sm" id="cloudNacti" ${cloudBezi?"disabled":""}>Načíst z cloudu ↓</button>
       <button class="btn btn-sm btn-primary" id="cloudUloz" ${cloudBezi?"disabled":""}>Uložit do cloudu ↑</button></div>
@@ -3014,6 +3086,7 @@ document.addEventListener("input",e=>{
   if(t.id==="cloudRepo"){D.cloud.repo=t.value.trim();persist();renderCloud();return}
   if(t.id==="cloudPath"){D.cloud.path=t.value.trim()||"data.json";persist();renderCloud();return}
   if(t.id==="cloudToken"){ghNastav(t.value.trim());renderCloud();return}
+  if(t.id==="cloudZarizeni"){zarizeniNastav(t.value.trim());renderCloud();return}
   if(t.id==="rkHledat"){rkQ=t.value;renderRekl();return}
   if(t.dataset.fi!==undefined&&t.dataset.ff&&fakturaCache){
     const x=fakturaCache.pol[Number(t.dataset.fi)];
@@ -3421,6 +3494,8 @@ document.addEventListener("click",e=>{
     if(drzene.length)alert("Do exportu nešly sestavy s drženou cenou:\n\n"+drzene.join("\n")
       +"\n\nDržení zrušíš tlačítkem na kartě sestavy.");
   }
+  if(t.id==="novaVerzeObnov"){location.reload();return}
+  if(t.id==="novaVerzeSkryj"){const e=$("#novaVerze");if(e)e.hidden=true;return}
   if(t.id==="cloudNacti"){cloudNacti(true);return}
   if(t.id==="cloudUloz"){cloudUloz();return}
   if(t.id==="cloudZapomen"){ghNastav("");const e=$("#cloudToken");if(e)e.value="";renderCloud();toast("Token smazán z tohoto zařízení");return}
@@ -3505,6 +3580,10 @@ function dl(name,text,mime){const b=new Blob([text],{type:mime+";charset=utf-8"}
 D=restore()||fresh();
 if(!D.priplatky)D.priplatky=[];
 renderAll();
+/* kontrola nové verze při startu a pak jednou za deset minut */
+zkontrolujVerzi();
+setInterval(zkontrolujVerzi,600000);
+
 if(!canStore)toast("Prohlížeč neukládá data — po zavření použij Uložit data");
 </script>
 </body>
