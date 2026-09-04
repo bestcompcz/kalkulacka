@@ -219,26 +219,26 @@ tr.unused td{background:#FEFCFB}
 @media(max-width:1100px){
   .blocks{grid-template-columns:repeat(auto-fill,minmax(380px,1fr))}
 }
-@media(max-width:820px){
-  body{font-size:14px}
-  .blocks{grid-template-columns:1fr}          /* jeden sloupec, nic namáčknutého */
-  /* max-content = tabulka je přesně tak široká, kolik potřebuje.
-     Bez toho prohlížeč sloupce stlačí a hlavičky se přes sebe přeloží. */
-  .block table{table-layout:auto;min-width:max-content}
+/* Tabulky se přepínají do posuvného režimu už na tabletech a rozloženém foldu —
+   tam se totiž sloupce roztahovaly podle šířek psaných pro velký monitor. */
+@media(max-width:1250px){
   .tbl table{min-width:max-content;width:max-content}
-  /* Procentní šířka se uvnitř max-content tabulky nemá k čemu vztáhnout,
-     pole pak přetečou přes sousední sloupec. Proto pevné šířky.
-     Čím užší sloupce, tím méně posouvání do stran. */
-  .tbl td,.tbl th{padding:2px 4px}
-  /* Sloupce mají v kódu napevno napsanou šířku pro velkou obrazovku. Uvnitř
-     tabulky roztažené podle obsahu z ní vzniká prázdné místo, tak ji zrušíme. */
+  .block table{table-layout:auto;min-width:max-content}
+  .tbl td,.tbl th{padding:2px 4px;white-space:nowrap}
   .tbl th{width:auto!important}
-  /* tlačítko s grafem historie ať zabere jen sebe */
+  .tbl td:first-child,.tbl th:first-child{white-space:normal}
   .tbl td .icon-x{padding:0 2px;font-size:11px;line-height:1}
   .tbl td input[type=text],.tbl td select,.tbl td input[list]{width:auto;min-width:120px;max-width:150px}
   .tbl td input.px,.tbl td input[type=number]{width:auto;min-width:50px;max-width:62px;padding:5px 4px}
-  /* Ikonka kalendáře i mezera kolem ní zabere na mobilu víc než samotné datum.
-     Výběr se otevře i klepnutím do pole, takže ikonu schováme úplně. */
+  .tbl td input[type=checkbox]{min-width:0;width:auto}
+  .tbl td .row{flex-wrap:nowrap}
+  .tbl td .row>input[type=text]{flex:0 0 auto}
+  .tbl td input[data-nf="popis"]{min-width:190px;max-width:200px}
+  .tbl td input[data-nf="kompText"]{min-width:118px;max-width:130px}
+  .tbl td input[data-nf="dodavatel"]{min-width:70px;max-width:80px;padding:2px 4px}
+  .tbl td select[data-nv]{min-width:38px;max-width:44px}
+  .tbl td .band{font-size:10.5px;padding:2px 6px}
+  /* ikonka kalendáře i mezera kolem ní zabere víc než samotné datum */
   .tbl td input[type=date]{width:auto;min-width:84px;max-width:90px;padding:5px 2px;
     -webkit-appearance:none;appearance:none;text-align:left}
   .tbl td input[type=date]::-webkit-calendar-picker-indicator{
@@ -248,28 +248,20 @@ tr.unused td{background:#FEFCFB}
   .tbl td input[type=date]::-webkit-clear-button{display:none!important;-webkit-appearance:none}
   .tbl td input[type=date]::-webkit-datetime-edit{padding:0!important;margin:0!important}
   .tbl td input[type=date]::-webkit-datetime-edit-fields-wrapper{padding:0!important}
-  .tbl td input[type=checkbox]{min-width:0;width:auto}
-  .tbl td .row{flex-wrap:nowrap}
-  .tbl td .row>input[type=text]{flex:0 0 auto}
-  /* jednotlivé sloupce Nákupů podle toho, kolik toho v nich opravdu je */
-  .tbl td input[data-nf="popis"]{min-width:190px;max-width:200px}
-  .tbl td input[data-nf="kompText"]{min-width:118px;max-width:130px}
-  .tbl td input[data-nf="dodavatel"]{min-width:70px;max-width:80px;padding:2px 4px}
-  .tbl td select[data-nv]{min-width:38px;max-width:44px}
-  .tbl td .band{font-size:10.5px;padding:2px 6px}
+}
+@media(max-width:820px){
+  body{font-size:14px}
+  .blocks{grid-template-columns:1fr}
   .block>header,.tbl{overflow-x:auto}
-  td,th{white-space:nowrap}                    /* konec lámání po písmenech */
-  td:first-child,th:first-child{white-space:normal;min-width:190px}
-  .modely-btn{white-space:normal}
   .slots{grid-template-columns:1fr}
   .slot{grid-template-columns:5px 78px 1fr 58px}
   .sur{grid-template-columns:1fr}
   .top{flex-wrap:wrap;gap:6px}
   .tabs{flex-wrap:wrap}
-  .sestLista{position:static}                  /* ukotvení bere na mobilu půlku displeje */
+  .sestLista{position:static}
   .hlavicka{flex-wrap:wrap;gap:4px}
   .hdetail{white-space:normal}
-  input,select,textarea{font-size:16px}        /* pod 16px iPhone při psaní přiblíží stránku */
+  input,select,textarea{font-size:16px}
   .px{min-width:56px}
 }
 @media(max-width:520px){
@@ -1097,7 +1089,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=130;
+const VERZE=131;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
