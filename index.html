@@ -208,13 +208,16 @@ tr.unused td{background:#FEFCFB}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
   padding:9px 16px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:60}
 .toast.on{opacity:1}
+/* Inline display:flex by přebil atribut hidden a pruh by svítil pořád. */
+#novaVerze{position:sticky;top:0;z-index:70;background:#1B8A57;color:#fff;
+  padding:9px 14px;font-size:13px;display:flex;gap:12px;align-items:center}
+#novaVerze[hidden]{display:none}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
 
-<div id="novaVerze" hidden style="position:sticky;top:0;z-index:70;background:#1B8A57;color:#fff;
-  padding:9px 14px;font-size:13px;display:flex;gap:12px;align-items:center">
+<div id="novaVerze" hidden>
   <strong>Je k dispozici novější verze kalkulačky.</strong>
   <span id="novaVerzeText" style="opacity:.85"></span>
   <button class="btn btn-sm" id="novaVerzeObnov" style="margin-left:auto;background:#fff;color:#12181F;font-weight:700">Obnovit</button>
@@ -1023,7 +1026,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=122;
+const VERZE=123;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
