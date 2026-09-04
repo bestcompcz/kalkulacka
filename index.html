@@ -227,13 +227,23 @@ tr.unused td{background:#FEFCFB}
   .block table{table-layout:auto;min-width:max-content}
   .tbl table{min-width:max-content;width:max-content}
   /* Procentní šířka se uvnitř max-content tabulky nemá k čemu vztáhnout,
-     pole pak přetečou přes sousední sloupec. Proto pevné šířky. */
-  .tbl td input[type=text],.tbl td select,.tbl td input[list]{width:auto;min-width:150px;max-width:230px}
-  .tbl td input.px,.tbl td input[type=number]{width:auto;min-width:64px;max-width:96px}
-  .tbl td input[type=date]{width:auto;min-width:118px}
+     pole pak přetečou přes sousední sloupec. Proto pevné šířky.
+     Čím užší sloupce, tím méně posouvání do stran. */
+  .tbl td,.tbl th{padding:2px 4px}
+  .tbl td input[type=text],.tbl td select,.tbl td input[list]{width:auto;min-width:120px;max-width:150px}
+  .tbl td input.px,.tbl td input[type=number]{width:auto;min-width:50px;max-width:62px;padding:5px 4px}
+  .tbl td input[type=date]{width:auto;min-width:92px;padding:5px 2px}
+  /* ikonka kalendáře zabere na mobilu víc místa než samotné datum */
+  .tbl td input[type=date]::-webkit-calendar-picker-indicator{display:none}
   .tbl td input[type=checkbox]{min-width:0;width:auto}
   .tbl td .row{flex-wrap:nowrap}
   .tbl td .row>input[type=text]{flex:0 0 auto}
+  /* jednotlivé sloupce Nákupů podle toho, kolik toho v nich opravdu je */
+  .tbl td input[data-nf="popis"]{min-width:190px;max-width:200px}
+  .tbl td input[data-nf="kompText"]{min-width:118px;max-width:130px}
+  .tbl td input[data-nf="dodavatel"]{min-width:70px;max-width:80px;padding:2px 4px}
+  .tbl td select[data-nv]{min-width:38px;max-width:44px}
+  .tbl td .band{font-size:10.5px;padding:2px 6px}
   .block>header,.tbl{overflow-x:auto}
   td,th{white-space:nowrap}                    /* konec lámání po písmenech */
   td:first-child,th:first-child{white-space:normal;min-width:190px}
@@ -1074,7 +1084,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=127;
+const VERZE=128;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
