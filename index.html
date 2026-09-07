@@ -1102,7 +1102,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=134;
+const VERZE=135;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1771,6 +1771,7 @@ function csvRozdel(txt){
   return lines.slice(1).map(l=>{const v=par(l),o={};hd.forEach((k,i)=>o[k]=v[i]??"");return o});
 }
 function najdiSestavu(kod){
+  if(!String(kod||"").trim())return null;   // bez kódu nesmí nic sedět, sestavy bez kódů mají prázdný záznam
   for(const s of D.sestavy) for(const k of (s.kod||"").split(","))
     if(k.trim()===kod)return s;
   return null;
@@ -1853,10 +1854,18 @@ function kOdpisu(txt){
     if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:"",dat:(r.date||"").slice(0,10),stav:"již odepsáno"});continue}
     const s=najdiSestavu(kod);
     if(!s){
-      let z=null;for(const[c,a]of Object.entries(D.komponenty))for(const k of a)if(String(k.kodEshop||"")===kod)z=k;
+      /* Bez podmínky na neprázdný kód by se prázdno rovnalo prázdnu
+         a položka by sedla na první komponentu bez e-shopového kódu. */
+      let z=null;
+      if(kod)for(const[c,a]of Object.entries(D.komponenty))for(const k of a)if(String(k.kodEshop||"")===kod)z=k;
+      /* Bez kódu nebo s neznámým kódem zkusíme položku poznat podle názvu z e-shopu. */
+      const nazevProdeje=r.orderItemName||r.itemName||"";
+      if(!z)z=komponentaZNazvuProdeje(nazevProdeje);
       if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),stav:"neomezené"})}
-      else if(z){pr(suma,z.id,poc);obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),stav:"zboží"})}
-      else {obj.push({C,kod,nazev:r.orderItemName||r.itemName||"",dat:(r.date||"").slice(0,10),stav:"NEZNÁMÝ KÓD"});chyby.push(kod)}
+      else if(z){pr(suma,z.id,poc);obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),
+        stav:kod?"zboží":"podle názvu"})}
+      else {obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),stav:"NEZNÁMÝ KÓD"});
+        chyby.push(kod||nazevProdeje)}
       continue;
     }
     const skrNazev=skrinZRadku(r,kod);
@@ -1876,6 +1885,7 @@ function kOdpisu(txt){
     for(const[i,q]of m) if(q>0)pr(suma,i,q);
     obj.push({C,kod,nazev:s.nazev+pot,dat:(r.date||"").slice(0,10),stav:pot?"s výhradou":"ok"});
   }
+  nahradRam(suma,obj);
   return {obj,suma,chyby:[...new Set(chyby)]};
 }
 function nactiSoubor(f){
@@ -3055,6 +3065,47 @@ function renderNab(){
   <datalist id="nbKompList">${seznamKomp}</datalist>`;
 }
 
+/* Když nejsou 32GB sady, staví se 32 GB ze dvou šestnáctek. Totéž 64 GB ze dvou
+   dvaatřicítek. Platí pro DDR4 i DDR5 a promítne se to i do odpisu skladu. */
+function polovicniModul(k){
+  const m=norm3(k.nazev).match(/^(\d+)\s*gb\s*ddr\s*(\d)$/);
+  if(!m)return null;
+  const kap=Number(m[1]), gen=m[2];
+  if(kap!==32&&kap!==64)return null;
+  for(const x of (D.komponenty["RAM"]||[])){
+    const p=norm3(x.nazev).match(/^(\d+)\s*gb\s*ddr\s*(\d)$/);
+    if(p&&Number(p[1])===kap/2&&p[2]===gen)return x;
+  }
+  return null;
+}
+function nahradRam(suma,obj){
+  for(const[id,q]of [...suma.entries()]){
+    const k=najdiKomp(id); if(!k)continue;
+    const pol=polovicniModul(k); if(!pol)continue;
+    const skladem=Math.max(0,Number(k.ks)||0);
+    const chybi=q-skladem;
+    if(chybi<=0)continue;
+    if(skladem>0)suma.set(id,skladem); else suma.delete(id);
+    suma.set(pol.id,(suma.get(pol.id)||0)+2*chybi);
+    obj.push({C:"",kod:"",nazev:chybi+"× "+k.nazev+" → "+(2*chybi)+"× "+pol.nazev,dat:"",stav:"náhrada"});
+  }
+}
+/* Když položka nemá kód, zkusíme ji poznat podle názvu z e-shopu.
+   Sáhne i do běžných komponent, ne jen do přeprodávaného zboží. */
+function komponentaZNazvuProdeje(nazev){
+  const k=komponentaZPopisu(nazev);
+  if(k)return k;
+  const t=norm3(nazev);
+  let nej=null,nejS=0;
+  for(const arr of Object.values(D.komponenty))for(const x of arr){
+    if(x.genericky)continue;
+    const sl=norm3(x.nazev).split(" ").filter(Boolean);
+    if(!sl.length)continue;
+    const sk=sl.filter(w=>t.includes(w)).length/sl.length;
+    if(sk>=0.8&&(sk>nejS||(sk===nejS&&nej&&x.nazev.length>nej.nazev.length))){nejS=sk;nej=x}
+  }
+  return nej;
+}
 /* ======== Reklamace ======== */
 let rkQ="";
 function stavReklamace(r){
