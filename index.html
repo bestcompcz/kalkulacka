@@ -32,7 +32,10 @@ h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
 .tab:hover{color:#fff;background:rgba(255,255,255,.07)}
 .tab[aria-selected="true"]{background:var(--signal);color:#fff}
 .top .spacer{flex:1}
-.top .util{display:flex;gap:6px}
+.top .util{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+/* tlačítka cloudu ať jsou v liště vidět jako první volba */
+.util button[data-cloud="uloz"]{background:var(--signal);border-color:var(--signal);color:#fff;font-weight:600}
+.util button[data-cloud="nacti"]{background:rgba(255,255,255,.16);color:#fff}
 .util button{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.16);
   color:#DCE5EE;padding:6px 11px;border-radius:6px;cursor:pointer;font-size:12.5px}
 .util button:hover{background:rgba(255,255,255,.18);color:#fff}
@@ -295,6 +298,10 @@ tr.unused td{background:#FEFCFB}
   </div>
   <div class="spacer"></div>
   <div class="util">
+    <button data-cloud="nacti" id="cloudNactiTop" title="Načíst data z cloudu">↓ z cloudu</button>
+    <button data-cloud="uloz" id="cloudUlozTop" title="Uložit data do cloudu">↑ do cloudu</button>
+    <span id="cloudTecka" title="" style="display:inline-block;width:9px;height:9px;border-radius:50%;
+      background:var(--ink-3);margin:0 4px"></span>
     <button id="save">Uložit data</button>
     <button id="load">Načíst data</button>
     <input type="file" id="file" accept=".json" hidden>
@@ -397,10 +404,7 @@ tr.unused td{background:#FEFCFB}
     <button class="btn btn-sm btn-primary" id="nkVse">Přidat do skladu a přepočítat ceny</button>
     <button class="btn btn-sm" id="nkSklad">Jen naskladnit</button>
     <button class="btn btn-sm" id="nkPrepocet">Jen přepočítat ceny</button>
-    <button class="btn btn-sm" id="nkCsv">Stáhnout CSV</button>
-    <span style="flex:1"></span>
-    <button class="btn btn-sm" data-cloud="nacti" title="Načíst data z cloudu">↓ cloud</button>
-    <button class="btn btn-sm btn-primary" data-cloud="uloz" title="Uložit data do cloudu">↑ cloud</button></div>
+    <button class="btn btn-sm" id="nkCsv">Stáhnout CSV</button></div>
   <p class="hint">Ceny za kus včetně DPH. Sloupec Dodáno doplňuj postupně, dokud dodávka nedorazí celá.</p>
   <div class="row" id="nkSum" style="gap:24px;margin-bottom:12px"></div>
   <div class="row" style="gap:10px;margin-bottom:8px">
@@ -454,10 +458,7 @@ tr.unused td{background:#FEFCFB}
 
 <section class="panel" id="p-sklad" hidden>
   <div class="row" style="margin-bottom:4px"><h2>Sklad</h2>
-    <button class="btn btn-sm" id="expSklad">Stáhnout CSV</button>
-    <span style="flex:1"></span>
-    <button class="btn btn-sm" data-cloud="nacti" title="Načíst data z cloudu">↓ cloud</button>
-    <button class="btn btn-sm btn-primary" data-cloud="uloz" title="Uložit data do cloudu">↑ cloud</button></div>
+    <button class="btn btn-sm" id="expSklad">Stáhnout CSV</button></div>
   <p class="hint">Kusy zadáváš ručně podle skutečného stavu. Použitá cena je vyšší ze skladové a reprodukční — tím nikdy neprodáváš pod nákupem.</p>
   <div class="row" id="skladSum" style="gap:24px;margin-bottom:12px"></div>
   <div class="row" style="gap:12px;margin-bottom:8px">
@@ -493,6 +494,7 @@ tr.unused td{background:#FEFCFB}
         <div><div class="muted" style="font-size:11.5px">Název zařízení</div>
           <input type="text" id="cloudZarizeni" placeholder="hlavní PC / mobil / sklad" style="width:170px"></div>
         <button class="btn btn-sm" id="cloudZapomen">Zapomenout token</button>
+        <button class="btn btn-sm" id="cloudVrat" title="Vrátit data do stavu před posledním načtením">Vrátit poslední načtení</button>
       </div>
       <p class="hint" style="margin:10px 0 0">Token zůstává jen v tomhle prohlížeči, do dat se neukládá —
         na každém zařízení ho zadáš jednou. Repozitář a soubor se synchronizují spolu s daty.<br>
@@ -1089,10 +1091,31 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=131;
+const VERZE=133;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
+const ZALOHA_KEY="bestcomp-zaloha-pred-nactenim";
+/* Než cokoli přepíše data v prohlížeči, uloží se stranou jejich kopie.
+   Omylem načtený cloud tak jde vrátit jedním tlačítkem. */
+function zalohujPredPrepsanim(duvod){
+  try{localStorage.setItem(ZALOHA_KEY,JSON.stringify({kdy:new Date().toISOString(),duvod,data:D}))}catch(e){}
+}
+function zalohaInfo(){
+  try{const z=JSON.parse(localStorage.getItem(ZALOHA_KEY)||"null");
+    return z&&z.data?z:null}catch(e){return null}
+}
+function vratZalohu(){
+  const z=zalohaInfo(); if(!z){toast("Žádná záloha tu není");return}
+  const p=pocty(z.data);
+  if(!confirm(`Vrátit stav před ${z.duvod}?\n\n`
+    +`Ze ${new Date(z.kdy).toLocaleString("cs-CZ")}\n   ${popisDat(z.data)}\n\n`
+    +`TEĎ V PROHLÍŽEČI\n   ${popisDat(D)}\n\n`
+    +`Do cloudu se tím nesáhne, jen se obnoví data tady.`))return;
+  zalohujPredPrepsanim("vrácení zálohy");
+  const c=D.cloud; D=oprav(z.data); D.cloud=c;
+  cloudSha=null; renderAll(); toast("Stav vrácen, zkontroluj data a teprve pak ulož");
+}
 const ghToken=()=>{try{return localStorage.getItem(GH_TOKEN_KEY)||""}catch(e){return ""}};
 const zarizeni=()=>{try{return localStorage.getItem(ZARIZENI_KEY)||"neznámé zařízení"}catch(e){return "neznámé"}};
 const zarizeniNastav=v=>{try{v?localStorage.setItem(ZARIZENI_KEY,v):localStorage.removeItem(ZARIZENI_KEY)}catch(e){}};
@@ -1139,7 +1162,12 @@ async function cloudNacti(potvrdit){
       `Data v cloudu uložila novější kalkulačka (v${nova.verzeApp}), tahle je v${VERZE}.\n\n`
       +`Nejspíš máš v prohlížeči starou verzi — obnov stránku přes Ctrl+F5.\n\n`
       +`Načíst i tak? Uložením bys pak mohl data poškodit.`))return;
-    if(potvrdit&&cloudZmena&&!confirm("Máš tu neuložené změny. Načtením z cloudu o ně přijdeš.\n\nPokračovat?"))return;
+    if(potvrdit&&cloudZmena&&!confirm(
+      `Máš tu neuložené změny. Načtením z cloudu o ně přijdeš.\n\n`
+      +`TADY  ${popisDat(D)}\nV CLOUDU  ${popisDat(nova)}\n\n`
+      +`Kopie současného stavu zůstane v prohlížeči, půjde vrátit tlačítkem Vrátit poslední načtení.\n\n`
+      +`Pokračovat?`))return;
+    zalohujPredPrepsanim("načtení z cloudu");
     const cloudNast=D.cloud;
     D=oprav(nova); D.cloud=cloudNast;      // nastavení spojení zůstává zařízení
     cloudSha=j.sha; cloudKdy=new Date().toISOString(); cloudZmena=false;
@@ -1217,6 +1245,17 @@ async function zkontrolujVerzi(){
   }catch(e){}
 }
 function renderCloud(){
+  /* Tečka v horní liště: zelená uloženo, červená neuložené změny, šedá bez spojení. */
+  const tec=$("#cloudTecka");
+  if(tec){
+    const c=D.cloud||{};
+    const stav=!c.repo||!ghToken()?["var(--ink-3)","synchronizace není nastavená"]
+      :cloudBezi?["var(--signal)","pracuji…"]
+      :cloudZmena?["var(--bad)","neuložené změny — dej ↑ do cloudu"]
+      :cloudKdy?["var(--ok)","uloženo "+new Date(cloudKdy).toLocaleTimeString("cs-CZ")]
+      :["var(--ink-3)","zatím nesynchronizováno"];
+    tec.style.background=stav[0]; tec.title=stav[1];
+  }
   const v=$("#verzeApp");
   if(v)v.textContent="v"+VERZE+(Number(D.verzeApp||0)>VERZE?" · data jsou z v"+D.verzeApp:"");
   const el=$("#cloudStav"); if(!el)return;
@@ -1237,6 +1276,8 @@ function renderCloud(){
       <div style="font-weight:700;color:${stav[1]}">${stav[0]}</div></div>
     <div><div class="muted" style="font-size:11.5px">Poslední synchronizace</div>
       <div style="font-size:13px">${cloudKdy?new Date(cloudKdy).toLocaleString("cs-CZ"):"—"}</div></div>
+    ${(()=>{const z=zalohaInfo();return z?`<div><div class="muted" style="font-size:11.5px">Záloha před přepsáním</div>
+      <div style="font-size:13px">${new Date(z.kdy).toLocaleString("cs-CZ")}</div></div>`:""})()}
     <div><div class="muted" style="font-size:11.5px">Data naposled uložilo</div>
       <div style="font-size:13px">${D.ulozenoKym?esc(D.ulozenoKym)+(D.ulozenoKdy?" · "+new Date(D.ulozenoKdy).toLocaleString("cs-CZ"):""):"—"}</div></div>
     <div style="margin-left:auto" class="row">
@@ -3569,6 +3610,7 @@ document.addEventListener("click",e=>{
   if(t.id==="novaVerzeSkryj"){const e=$("#novaVerze");if(e)e.hidden=true;return}
   if(t.id==="cloudNacti"||t.dataset.cloud==="nacti"){cloudNacti(true);return}
   if(t.id==="cloudUloz"||t.dataset.cloud==="uloz"){cloudUloz();return}
+  if(t.id==="cloudVrat"){vratZalohu();return}
   if(t.id==="cloudZapomen"){ghNastav("");const e=$("#cloudToken");if(e)e.value="";renderCloud();toast("Token smazán z tohoto zařízení");return}
   if(t.id==="nkFaktura"){zobrazFakturu();return}
   if(t.id==="faktZrus"){fakturaCache=null;$("#modal").hidden=true;return}
@@ -3636,7 +3678,7 @@ document.addEventListener("click",e=>{
 });
 $("#file").onchange=e=>{const f=e.target.files[0];if(!f)return;
   const rd=new FileReader();
-  rd.onload=()=>{try{D=oprav(JSON.parse(rd.result));renderAll();toast("Data načtena")}
+  rd.onload=()=>{try{zalohujPredPrepsanim("načtení souboru");D=oprav(JSON.parse(rd.result));renderAll();toast("Data načtena")}
     catch(err){toast("Soubor se nepodařilo přečíst")}};
   rd.readAsText(f);e.target.value="";};
 
