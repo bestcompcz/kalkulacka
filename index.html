@@ -605,8 +605,10 @@ function novaSestava(n){return{id:uid(),nazev:n||"Nová sestava",vyber:{},prace:
 const KEY="bestcomp-kalk-v2";
 let canStore=true;
 try{localStorage.setItem(KEY+"-t","1");localStorage.removeItem(KEY+"-t")}catch(e){canStore=false}
-function persist(){ if(!canStore)return; try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){}
-  cloudZmena=true; renderCloud(); naplanujAutoUlozeni(); }
+/* Zápis do prohlížeče bez příznaku neuložených změn — používá se po úspěšném
+   uložení do cloudu, aby si prohlížeč pamatoval i razítko o uložení. */
+function ulozLokalne(){ if(!canStore)return; try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){} }
+function persist(){ ulozLokalne(); cloudZmena=true; renderCloud(); naplanujAutoUlozeni(); }
 function restore(){ if(!canStore)return null;
   try{const s=localStorage.getItem(KEY);return s?oprav(JSON.parse(s)):null}catch(e){return null} }
 const COLL=new Intl.Collator("cs",{numeric:true,sensitivity:"base"});
@@ -1102,7 +1104,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=135;
+const VERZE=136;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1181,8 +1183,8 @@ async function cloudNacti(potvrdit){
     zalohujPredPrepsanim("načtení z cloudu");
     const cloudNast=D.cloud;
     D=oprav(nova); D.cloud=cloudNast;      // nastavení spojení zůstává zařízení
-    cloudSha=j.sha; cloudKdy=new Date().toISOString(); cloudZmena=false;
-    renderAll(); cloudZmena=false; renderCloud();
+    cloudSha=j.sha; cloudKdy=new Date().toISOString();
+    renderAll(); ulozLokalne(); cloudZmena=false; renderCloud();
     toast("Načteno z cloudu");
   }catch(e){toast("Načtení selhalo: "+e.message)}
   finally{cloudBezi=false; renderCloud()}
@@ -1242,7 +1244,9 @@ async function cloudUloz(tiche){
     }
     const j=await r.json();
     cloudSha=j.content&&j.content.sha; cloudKdy=new Date().toISOString(); cloudZmena=false;
-    toast("Uloženo do cloudu");
+    ulozLokalne();               // razítko o uložení musí přežít i obnovení stránky
+    renderCloud();
+    if(!tiche)toast("Uloženo do cloudu");
   }catch(e){toast("Uložení selhalo: "+e.message)}
   finally{cloudBezi=false; renderCloud()}
 }
@@ -1281,7 +1285,10 @@ async function zkontrolujCloudPriStartu(){
     const r=await ghFetch(ghUrl()); if(!r.ok)return;
     const j=await r.json();
     const v=JSON.parse(zBase64(j.content));
-    if(v.ulozenoKdy&&(!D.ulozenoKdy||v.ulozenoKdy>D.ulozenoKdy)){
+    /* Vlastní uložení z tohohle zařízení není důvod k poplachu. */
+    const cizi=v.ulozenoKdy&&(!D.ulozenoKdy||v.ulozenoKdy>D.ulozenoKdy)
+      &&!(v.ulozenoKym===zarizeni()&&v.ulozenoKdy===D.ulozenoKdy);
+    if(cizi){
       const el=$("#cloudPruh"); if(!el)return;
       $("#cloudPruhText").textContent=
         `V cloudu je novější uložení — ${v.ulozenoKym||"jiné zařízení"}, `
