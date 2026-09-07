@@ -215,6 +215,9 @@ tr.unused td{background:#FEFCFB}
 #novaVerze{position:sticky;top:0;z-index:70;background:#1B8A57;color:#fff;
   padding:9px 14px;font-size:13px;display:flex;gap:12px;align-items:center}
 #novaVerze[hidden]{display:none}
+#cloudPruh{position:sticky;top:0;z-index:71;background:#C0392B;color:#fff;
+  padding:9px 14px;font-size:13px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#cloudPruh[hidden]{display:none}
 /* ================= mobil a úzké obrazovky =================
    Tabulky se na úzkém displeji nesmí smršťovat — text by se lámal po písmenech.
    Místo toho dostanou pevnou minimální šířku a posouvají se do stran. */
@@ -277,6 +280,12 @@ tr.unused td{background:#FEFCFB}
 </head>
 <body>
 
+<div id="cloudPruh" hidden>
+  <strong>Pozor na data.</strong>
+  <span id="cloudPruhText" style="opacity:.9"></span>
+  <button class="btn btn-sm" data-cloud="nacti" style="margin-left:auto;background:#fff;color:#12181F;font-weight:700">Načíst z cloudu</button>
+  <button class="btn btn-sm" id="cloudPruhSkryj" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.5)">Nechat být</button>
+</div>
 <div id="novaVerze" hidden>
   <strong>Je k dispozici novější verze kalkulačky.</strong>
   <span id="novaVerzeText" style="opacity:.85"></span>
@@ -495,6 +504,8 @@ tr.unused td{background:#FEFCFB}
           <input type="text" id="cloudZarizeni" placeholder="hlavní PC / mobil / sklad" style="width:170px"></div>
         <button class="btn btn-sm" id="cloudZapomen">Zapomenout token</button>
         <button class="btn btn-sm" id="cloudVrat" title="Vrátit data do stavu před posledním načtením">Vrátit poslední načtení</button>
+        <label class="row" style="gap:6px;font-size:12.5px;cursor:pointer">
+          <input type="checkbox" id="cloudAuto" style="width:auto"> ukládat automaticky minutu po změně</label>
       </div>
       <p class="hint" style="margin:10px 0 0">Token zůstává jen v tomhle prohlížeči, do dat se neukládá —
         na každém zařízení ho zadáš jednou. Repozitář a soubor se synchronizují spolu s daty.<br>
@@ -595,7 +606,7 @@ const KEY="bestcomp-kalk-v2";
 let canStore=true;
 try{localStorage.setItem(KEY+"-t","1");localStorage.removeItem(KEY+"-t")}catch(e){canStore=false}
 function persist(){ if(!canStore)return; try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){}
-  cloudZmena=true; renderCloud(); }
+  cloudZmena=true; renderCloud(); naplanujAutoUlozeni(); }
 function restore(){ if(!canStore)return null;
   try{const s=localStorage.getItem(KEY);return s?oprav(JSON.parse(s)):null}catch(e){return null} }
 const COLL=new Intl.Collator("cs",{numeric:true,sensitivity:"base"});
@@ -1091,7 +1102,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=133;
+const VERZE=134;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1180,13 +1191,15 @@ const pocty=d=>({nákupů:(d.nakupy||[]).length,sestav:(d.sestavy||[]).length,
   komponent:Object.values(d.komponenty||{}).reduce((a,x)=>a+x.length,0),
   odpisů:(d.odpisy||[]).length,příplatků:(d.priplatky||[]).length,nabídek:(d.nabidky||[]).length});
 const popisDat=d=>Object.entries(pocty(d)).map(([k,v])=>k+" "+v).join(", ");
-async function cloudUloz(){
+async function cloudUloz(tiche){
   if(!cloudOk()){toast("Nejdřív vyplň repozitář a token v Nastavení");return}
   if(cloudBezi)return; cloudBezi=true; renderCloud();
   try{
-    if(Number(D.verzeApp||0)>VERZE&&!confirm(
-      `Tahle data uložila novější kalkulačka (v${D.verzeApp}), ty jedeš na v${VERZE}.\n\n`
-      +`Uložením je můžeš poškodit. Pokračovat?`))return;
+    if(Number(D.verzeApp||0)>VERZE){
+      if(tiche)return;
+      if(!confirm(`Tahle data uložila novější kalkulačka (v${D.verzeApp}), ty jedeš na v${VERZE}.\n\n`
+        +`Uložením je můžeš poškodit. Pokračovat?`))return;
+    }
     /* Než něco přepíšeme, podíváme se, co v cloudu leží. Když se to od našeho
        posledního načtení liší, ukážeme obojí vedle sebe a necháme rozhodnout. */
     const g=await ghFetch(ghUrl());
@@ -1194,11 +1207,18 @@ async function cloudUloz(){
     if(g.ok){
       const gj=await g.json();
       vzdalenySha=gj.sha;
-      if(cloudSha&&gj.sha!==cloudSha){
+      /* Rozhoduje čas uložení, ne jen otisk. Po obnovení stránky otisk chybí
+         a bez téhle podmínky by se novější cloud přepsal beze slova. */
+      const cizi=(vzdalena0=>{
+        try{const v=JSON.parse(zBase64(gj.content));
+          return v&&v.ulozenoKdy&&(!D.ulozenoKdy||v.ulozenoKdy>D.ulozenoKdy)}catch(e){return false}
+      })();
+      if((cloudSha&&gj.sha!==cloudSha)||cizi){
         let vzdalena=null;
         try{vzdalena=JSON.parse(zBase64(gj.content))}catch(e){}
         const kdo=vzdalena&&vzdalena.ulozenoKym?vzdalena.ulozenoKym:"jiné zařízení";
         const kdy=vzdalena&&vzdalena.ulozenoKdy?new Date(vzdalena.ulozenoKdy).toLocaleString("cs-CZ"):"neznámo kdy";
+        if(tiche){toast("Automatické uložení zastaveno — v cloudu je novější verze");return}
         if(!confirm(
           `V cloudu je novější uložení, než jaké máš načtené.\n\n`
           +`V CLOUDU  ${kdo}, ${kdy}\n   ${vzdalena?popisDat(vzdalena):"nepodařilo se přečíst"}\n\n`
@@ -1244,6 +1264,32 @@ async function zkontrolujVerzi(){
     }
   }catch(e){}
 }
+/* Automatické ukládání: minutu po poslední změně se data pošlou do cloudu.
+   Když by hrozilo přepsání cizí novější verze, samo neuloží nic a jen upozorní. */
+let autoCas=null;
+const autoZap=()=>{try{return localStorage.getItem("bestcomp-auto")!=="0"}catch(e){return true}};
+const autoNastav=v=>{try{localStorage.setItem("bestcomp-auto",v?"1":"0")}catch(e){}};
+function naplanujAutoUlozeni(){
+  if(!autoZap()||!cloudOk())return;
+  clearTimeout(autoCas);
+  autoCas=setTimeout(()=>{ if(cloudZmena&&!cloudBezi)cloudUloz(true) },60000);
+}
+/* Při startu se podíváme, jestli v cloudu neleží novější uložení z jiného zařízení. */
+async function zkontrolujCloudPriStartu(){
+  if(!cloudOk())return;
+  try{
+    const r=await ghFetch(ghUrl()); if(!r.ok)return;
+    const j=await r.json();
+    const v=JSON.parse(zBase64(j.content));
+    if(v.ulozenoKdy&&(!D.ulozenoKdy||v.ulozenoKdy>D.ulozenoKdy)){
+      const el=$("#cloudPruh"); if(!el)return;
+      $("#cloudPruhText").textContent=
+        `V cloudu je novější uložení — ${v.ulozenoKym||"jiné zařízení"}, `
+        +`${new Date(v.ulozenoKdy).toLocaleString("cs-CZ")}. Tady máš ${popisDat(D)}.`;
+      el.hidden=false;
+    }else{ cloudSha=j.sha; }
+  }catch(e){}
+}
 function renderCloud(){
   /* Tečka v horní liště: zelená uloženo, červená neuložené změny, šedá bez spojení. */
   const tec=$("#cloudTecka");
@@ -1263,6 +1309,7 @@ function renderCloud(){
   if(rp&&document.activeElement!==rp)rp.value=(D.cloud&&D.cloud.repo)||"";
   if(pt&&document.activeElement!==pt)pt.value=(D.cloud&&D.cloud.path)||"data.json";
   if(tk&&document.activeElement!==tk)tk.value=ghToken();
+  const au=$("#cloudAuto"); if(au)au.checked=autoZap();
   const zr=$("#cloudZarizeni");
   if(zr&&document.activeElement!==zr)zr.value=(()=>{try{return localStorage.getItem(ZARIZENI_KEY)||""}catch(e){return ""}})();
   const c=D.cloud||{};
@@ -3608,9 +3655,12 @@ document.addEventListener("click",e=>{
        Otazník s časem donutí prohlížeč stáhnout soubor znovu ze serveru. */
     location.replace(location.pathname+"?v="+Date.now());return}
   if(t.id==="novaVerzeSkryj"){const e=$("#novaVerze");if(e)e.hidden=true;return}
+  if(t.id==="cloudPruhSkryj"){const e=$("#cloudPruh");if(e)e.hidden=true;return}
   if(t.id==="cloudNacti"||t.dataset.cloud==="nacti"){cloudNacti(true);return}
   if(t.id==="cloudUloz"||t.dataset.cloud==="uloz"){cloudUloz();return}
   if(t.id==="cloudVrat"){vratZalohu();return}
+  if(t.id==="cloudAuto"){autoNastav(t.checked);renderCloud();
+    toast(t.checked?"Automatické ukládání zapnuto":"Automatické ukládání vypnuto");return}
   if(t.id==="cloudZapomen"){ghNastav("");const e=$("#cloudToken");if(e)e.value="";renderCloud();toast("Token smazán z tohoto zařízení");return}
   if(t.id==="nkFaktura"){zobrazFakturu();return}
   if(t.id==="faktZrus"){fakturaCache=null;$("#modal").hidden=true;return}
@@ -3697,6 +3747,7 @@ renderAll();
 {const v=$("#verzeApp"); if(v)v.textContent="v"+VERZE;}
 zkontrolujVerzi();
 setInterval(zkontrolujVerzi,600000);
+zkontrolujCloudPriStartu();
 
 if(!canStore)toast("Prohlížeč neukládá data — po zavření použij Uložit data");
 </script>
