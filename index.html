@@ -1110,7 +1110,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=138;
+const VERZE=139;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2544,7 +2544,10 @@ function analyzaVse(){
   const nask=kZaskladneni();
   /* 2. nové skladové ceny při simulovaném množství */
   const ksPo={};
-  for(const x of nask)ksPo[x.k.id]=(Number(x.k.ks)||0)+x.pridat;
+  for(const x of nask){
+    if(x.ext)continue;                     // kusy v externím skladu neovlivňují okno pro průměr
+    ksPo[x.k.id]=(ksPo[x.k.id]!=null?ksPo[x.k.id]:(Number(x.k.ks)||0))+x.pridat;
+  }
   const ceny=[],nula=[];
   for(const arr of Object.values(D.komponenty))for(const k of arr){
     const ks=ksPo[k.id]!=null?ksPo[k.id]:(Number(k.ks)||0); if(!ks)continue;
@@ -2703,7 +2706,10 @@ function provedVse(){
   const drzet=new Set();
   $$(".vseChk").forEach(ch=>{ if(!ch.checked)drzet.add(Number(ch.dataset.i)) });
   for(const x of A.nask){
-    if(!x.k.neomezene)x.k.ks=(Number(x.k.ks)||0)+x.pridat;
+    if(!x.k.neomezene){
+      const kam=x.ext?"ksExt":"ks";        // externí dodávka nesmí skončit v hlavním skladu
+      x.k[kam]=(Number(x.k[kam])||0)+x.pridat;
+    }
     for(const r of x.rad)r.zaskl=Number(r.dodano)||0;
   }
   for(const z of A.ceny){z.k.sklad=z.prum; z.k.modely=z.modely}
