@@ -424,12 +424,15 @@ tr.unused td{background:#FEFCFB}
     <select id="nkDodav" style="max-width:170px"></select>
     <label class="row" style="gap:6px;font-size:13px;cursor:pointer;margin-left:auto">
       <input type="checkbox" id="nkOtev" style="width:auto"> jen nedodané</label>
+    <label class="row" style="gap:6px;font-size:13px;cursor:pointer;color:var(--bad);font-weight:600">
+      <input type="checkbox" id="nkVratky" style="width:auto"> jen vrácení</label>
   </div>
   <datalist id="kompList"></datalist>
   <div class="card"><div class="tbl"><table id="nkTab"><thead><tr>
     <th style="width:106px">Datum</th><th style="width:210px">Komponenta</th><th style="width:230px">Přesný produkt</th>
     <th style="width:84px">Dodavatel</th><th style="width:52px">Ks</th><th style="width:82px" title="Cena za kus bez DPH">Bez DPH</th><th style="width:84px" title="Cena za kus včetně DPH">S DPH</th>
     <th style="width:58px">Dodáno</th>
+    <th style="width:40px" title="Do externího skladu mimo Plzeň">Ext.</th>
     <th style="width:58px" title="Kolik kusů už dodavatel vyfakturoval">Fakt.</th>
     <th style="width:46px" title="Vybráno — kandidát, ještě neobjednáno">Vyb.</th><th style="width:84px">Stav</th>
     <th style="width:46px" title="Zaplaceno">Zapl.</th>
@@ -625,6 +628,8 @@ const MAPA_DEF={"CPU":"Výměna procesoru","RAM":"Rozšířit pamět RAM","SSD":
  "Základní deska":"Výměna základní desky","Zdroj":"Výměna zdroje","Chladič":"Lepší chlazení CPU"};
 function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.bezDph))d.bezDph=["atc","atcomp","asbis","100mega"];   // uvádějí ceny bez DPH
+  for(const arr of Object.values(d.komponenty||{}))for(const k of arr)
+    if(k.ksExt===undefined)k.ksExt=null;       // kusy uložené v externím skladu
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
   if(d.cloud.zarizeni===undefined)d.cloud.zarizeni="";
   if(!Array.isArray(d.reklamace))d.reklamace=[];
@@ -655,6 +660,7 @@ function initMapa(d){
     if(n.vyber===undefined)n.vyber=false;     // vybráno = kandidát, ještě neobjednáno
     if(n.doruceni===undefined)n.doruceni=null;     // slíbený termín doručení
     if(n.odkaz===undefined)n.odkaz="";
+    if(n.ext===undefined)n.ext=false;          // dodávka jde rovnou do externího skladu
     if(n.fakt===undefined)n.fakt=null;         // kolik kusů už dodavatel vyfakturoval
     if(n.faktCislo===undefined)n.faktCislo=""; }
   for(const p of d.priplatky){ if(p.param===undefined)p.param=null; if(p.eshop===undefined)p.eshop=''; }
@@ -1104,7 +1110,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=137;
+const VERZE=138;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1306,6 +1312,18 @@ async function zkontrolujCloudPriStartu(){
       el.hidden=false;
     }else{ cloudSha=j.sha; const el=$("#cloudPruh"); if(el)el.hidden=true; }
   }catch(e){}
+}
+/* Převoz z externího skladu do hlavního. Mění se jen umístění, ne ceny ani hodnota. */
+function prevezZExterniho(id){
+  const k=najdiKomp(id); if(!k)return;
+  const ext=Number(k.ksExt)||0;
+  if(ext<=0){toast("V externím skladu nic není");return}
+  const zad=prompt(`Kolik kusů ${k.nazev} přivážíš z externího skladu?\n\nV externím skladu: ${ext} ks\nV hlavním skladu: ${Number(k.ks)||0} ks`,String(ext));
+  if(zad===null)return;
+  const q=Math.min(Math.max(0,Math.round(Number(zad)||0)),ext);
+  if(!q)return;
+  k.ksExt=ext-q; k.ks=(Number(k.ks)||0)+q;
+  renderAll(); toast(`${q}× ${k.nazev} převezeno do hlavního skladu`);
 }
 function renderCloud(){
   /* Tečka v horní liště: zelená uloženo, červená neuložené změny, šedá bez spojení. */
@@ -1653,18 +1671,25 @@ function stavNakupu(n){
   const ks=Number(n.ks)||0, d=Number(n.dodano)||0, f=Number(n.fakt)||0;
   const stav=n.vyber?"vybráno":(d>=ks&&ks>0?"dodáno":d>0?"částečně"
     :(f>0?(f>=ks?"vyfakturováno":"fakt. "+f+"/"+ks):"objednáno"));
-  let bg=stav==="vybráno"?"#FFFFFF":stav==="dodáno"?"#E4F6EC":stav==="částečně"?"#FBF0D2"
-    :/^vyfakt|^fakt\./.test(stav)?"#F6DFC4":"#FBE0C0";
-  if(n.vratka==="ceka")bg="#FDECEA"; else if(n.vratka==="vraceno")bg="#F3F4F6";
-  const pruh=n.vratka?"":stav==="dodáno"?"box-shadow:inset 3px 0 0 var(--ok);"
+  let bg=stav==="vybráno"?"#FFFFFF":stav==="dodáno"?"#CDEDDA":stav==="částečně"?"#F8E3A8"
+    :/^vyfakt|^fakt\./.test(stav)?"#F3CFA6":"#F8CFA4";
+  /* Vrácení musí být vidět na dálku — sytá barva, tlustý pruh a jasný štítek. */
+  let stavTxt=stav;
+  if(n.vratka==="ceka"){bg="#FAC7C0";stavTxt="VRACÍ SE"}
+  else if(n.vratka==="vraceno"){bg="#E2E5EA";stavTxt="vráceno"}
+  const pruh=n.vratka==="ceka"?"box-shadow:inset 6px 0 0 #C0392B;"
+    :n.vratka==="vraceno"?"box-shadow:inset 6px 0 0 #8C97A5;"
+    :stav==="dodáno"?"box-shadow:inset 3px 0 0 var(--ok);"
     :stav==="vybráno"?"box-shadow:inset 3px 0 0 var(--line);"
     :stav==="částečně"?"":"box-shadow:inset 3px 0 0 #D9822B;";
-  const band=stav==="dodáno"?"background:#1B8A57;color:#fff;font-weight:700"
+  const band=n.vratka==="ceka"?"background:#C0392B;color:#fff;font-weight:800;letter-spacing:.03em"
+    :n.vratka==="vraceno"?"background:#8C97A5;color:#fff;font-weight:700"
+    :stav==="dodáno"?"background:#1B8A57;color:#fff;font-weight:700"
     :stav==="částečně"?"background:#F4D06F;color:#4A2F0B;font-weight:600"
     :stav==="objednáno"?"background:#D9822B;color:#fff;font-weight:700"
     :/^vyfakt|^fakt\./.test(stav)?"background:#B4651A;color:#fff;font-weight:700"
     :"background:#F1F4F8;color:#5A6472;font-weight:600";
-  return {stav,bg,pruh,band};
+  return {stav:stavTxt,bg,pruh,band};
 }
 function osvezStavNakupu(t,n){
   const tr=t.closest("tr"); if(!tr)return;
@@ -1688,6 +1713,7 @@ function osvezStavNakupu(t,n){
 }
 function renderNakupy(){
   const jen=$("#nkOtev")&&$("#nkOtev").checked;
+  const jenVr=$("#nkVratky")&&$("#nkVratky").checked;
   const K=Object.entries(D.komponenty).flatMap(([c,a])=>a.map(k=>({...k,kat:c})));
   $("#kompList").innerHTML=K.map(k=>`<option value="${esc(k.nazev)}">${esc(k.kat)}</option>`).join("");
   const katOf=n=>{const k=n.komp?K.find(x=>x.id===n.komp):null;return k?k.kat:"mimo ceník"};
@@ -1721,13 +1747,18 @@ function renderNakupy(){
     return poradi.get(a.id)-poradi.get(b.id); // shodné zůstane v pořadí zápisu
   });
   let ceka=0,hodC=0,celk=0;
-  const rows=lst.filter(n=>{const d=Number(n.dodano)||0,k=Number(n.ks)||0;return !jen||d<k}).map(n=>{
+  const rows=lst.filter(n=>{const d=Number(n.dodano)||0,k=Number(n.ks)||0;
+    if(jenVr&&!n.vratka)return false;
+    return !jen||d<k}).map(n=>{
     const ks=Number(n.ks)||0,dod=Number(n.dodano)||0,c=Number(n.cena)||0;
     const S=stavNakupu(n), stav=S.stav, bg=S.bg, pruh=S.pruh;
     return `<tr style="background:${bg};${pruh}">
       <td><input type="date" value="${esc(n.datum||"")}" data-nn="${n.id}" data-nf="datum" style="font-size:12px;min-width:0"></td>
       <td><div class="row" style="gap:3px;flex-wrap:nowrap">
         ${n.komp?`<button class="icon-x" data-hist="${n.komp}" title="Historie nákupů a vývoj ceny" style="font-size:12px;flex:0 0 auto">📈</button>`:'<span style="width:18px;flex:0 0 auto"></span>'}
+        ${n.komp?`<span class="band" data-skladem="${n.komp}" title="Kusů v hlavním skladu"
+          style="background:#EAF0FB;color:#2C4C86;font-weight:700;flex:0 0 auto">${(() => {
+            const kk=najdiKomp(n.komp); return kk?(kk.neomezene?"∞":(Number(kk.ks)||0)):"?";})()}</span>`:""}
         <input type="text" list="kompList" data-nn="${n.id}" data-nf="kompText" style="flex:1;min-width:0;${n.komp?"":"background:#FFF8F3;border-color:#EDCDB4"}"
           value="${esc(n.komp&&K.find(x=>x.id===n.komp)?K.find(x=>x.id===n.komp).nazev:"")}"
           placeholder="mimo ceník — piš pro hledání" title="${esc(n.komp&&K.find(x=>x.id===n.komp)?K.find(x=>x.id===n.komp).kat+" · "+K.find(x=>x.id===n.komp).nazev:"")}">
@@ -1740,6 +1771,8 @@ function renderNakupy(){
       <td class="r"><input type="number" step="0.01" class="px" value="${n.cena!=null&&n.cena!==""?r2(Number(n.cena)/VAT()):""}" data-nn="${n.id}" data-nf="cenaBez" placeholder="—"></td>
       <td class="r"><input type="number" step="0.01" class="px" value="${n.cena??""}" data-nn="${n.id}" data-nf="cena"></td>
       <td class="r"><input type="number" class="px" value="${n.dodano??""}" data-nn="${n.id}" data-nf="dodano" ${n.vyber?"disabled":""}></td>
+      <td class="r"><input type="checkbox" ${n.ext?"checked":""} data-next="${n.id}"
+        style="width:auto;cursor:pointer" title="Dodávka jde do externího skladu mimo Plzeň"></td>
       <td class="r"><input type="number" class="px" value="${n.fakt??""}" data-nn="${n.id}" data-nf="fakt"
         placeholder="—" ${n.vyber?"disabled":""} title="${n.faktCislo?esc("faktura "+n.faktCislo):"kolik kusů je vyfakturováno"}"></td>
       <td class="r"><input type="checkbox" ${n.vyber?"checked":""} data-nvyb="${n.id}" style="width:auto;cursor:pointer" title="Vybráno — kandidát na objednávku. Odškrtnutím se z něj stane objednávka."></td>
@@ -1761,7 +1794,7 @@ function renderNakupy(){
     if(n.vratka==="vraceno")continue;
     celk+=d*c; if(d<ks){ceka++;hodC+=(ks-d)*c}
     if(!n.zaplaceno)nezapl+=ks*c;}
-  $("#nkBody").innerHTML=rows||`<tr><td colspan="15" style="padding:26px;text-align:center;color:var(--ink-3)">${D.nakupy.length?"Nic neodpovídá filtru.":"Zatím žádný nákup."}</td></tr>`;
+  $("#nkBody").innerHTML=rows||`<tr><td colspan="16" style="padding:26px;text-align:center;color:var(--ink-3)">${D.nakupy.length?"Nic neodpovídá filtru.":"Zatím žádný nákup."}</td></tr>`;
   $("#nkSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Nakoupeno celkem</div><div class="price">${kc(celk)}</div></div>
     <div><div class="muted" style="font-size:11.5px">Vybráno k objednání</div><div class="price" style="font-size:20px;color:${vybr?"var(--signal)":"var(--ink-3)"}">${vybr?kc(hodVyb):"—"}</div></div>
     <div><div class="muted" style="font-size:11.5px">Čeká na dodání</div><div class="price" style="font-size:20px;color:${ceka?"var(--bad)":"var(--ok)"}">${ceka}</div></div>
@@ -1980,15 +2013,21 @@ function provedOdpis(){
   $("#modal").hidden=true; $("#pdCsv").value=""; odpisCache=null;
   renderAll(); toast("Sklad odepsán, vyřešeno do "+czDatum(maxDat));
 }
+/* Dodávka označená jako externí jde do skladu mimo Plzeň. Vedeme ji zvlášť,
+   protože z ní nejde stavět — nejdřív se musí přivézt. */
 function kZaskladneni(){
   const out=[];
   for(const[cat,arr]of Object.entries(D.komponenty))for(const k of arr){
     const rad=D.nakupy.filter(n=>n.komp===k.id&&!n.vratka&&!n.vyber&&(Number(n.dodano)||0)>(Number(n.zaskl)||0));
     if(!rad.length)continue;
-    const pridat=rad.reduce((a,n)=>a+((Number(n.dodano)||0)-(Number(n.zaskl)||0)),0);
-    if(pridat>0)out.push({k,cat,pridat,rad});
+    for(const ext of [false,true]){
+      const r=rad.filter(n=>!!n.ext===ext);
+      if(!r.length)continue;
+      const pridat=r.reduce((a,n)=>a+((Number(n.dodano)||0)-(Number(n.zaskl)||0)),0);
+      if(pridat>0)out.push({k,cat,pridat,rad:r,ext});
+    }
   }
-  return out.sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
+  return out.sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev)||(a.ext?1:0)-(b.ext?1:0));
 }
 function zobrazZaskladneni(){
   const L=kZaskladneni();
@@ -1998,12 +2037,14 @@ function zobrazZaskladneni(){
     <p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Přidá se jen to, co ještě ve skladu není. Ceny se tímto nemění.</p>
     <div class="tbl"><table><thead><tr><th>Komponenta</th><th>Nákupy</th>
       <th class="r">Teď</th><th class="r">Přidat</th><th class="r">Nově</th></tr></thead><tbody>
-    ${L.map(x=>`<tr>
-      <td><strong>${esc(x.k.nazev)}</strong><div class="muted" style="font-size:11px">${esc(x.cat)}</div></td>
+    ${L.map(x=>{const kam=x.ext?"ksExt":"ks", teď=Number(x.k[kam])||0;
+      return `<tr${x.ext?' style="background:#EEF3FB"':''}>
+      <td><strong>${esc(x.k.nazev)}</strong><div class="muted" style="font-size:11px">${esc(x.cat)}</div>
+        ${x.ext?'<span class="band" style="background:#2C4C86;color:#fff;font-weight:700">externí sklad</span>':''}</td>
       <td style="font-size:11.5px;color:var(--ink-2)">${x.rad.map(n=>`${(Number(n.dodano)||0)-(Number(n.zaskl)||0)}× ${esc(n.datum||"")} ${esc((n.popis||"").slice(0,30))} (${Math.round(Number(n.cena)||0)})`).join("<br>")}</td>
-      <td class="r num">${Number(x.k.ks)||0}</td>
+      <td class="r num">${teď}</td>
       <td class="r num" style="color:var(--ok);font-weight:600">+${x.pridat}</td>
-      <td class="r num" style="font-weight:600">${(Number(x.k.ks)||0)+x.pridat}</td></tr>`).join("")}
+      <td class="r num" style="font-weight:600">${teď+x.pridat}</td></tr>`}).join("")}
     </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="zaskZrus">Zrušit</button>
@@ -2013,7 +2054,10 @@ function zobrazZaskladneni(){
 function provedZaskladneni(){
   const L=kZaskladneni(); let n=0;
   for(const x of L){
-    if(!x.k.neomezene)x.k.ks=(Number(x.k.ks)||0)+x.pridat;
+    if(!x.k.neomezene){
+      const kam=x.ext?"ksExt":"ks";
+      x.k[kam]=(Number(x.k[kam])||0)+x.pridat;
+    }
     for(const r of x.rad) r.zaskl=Number(r.dodano)||0;
     n++;
   }
@@ -3126,11 +3170,11 @@ function komponentaZNazvuProdeje(nazev){
 /* ======== Reklamace ======== */
 let rkQ="";
 function stavReklamace(r){
-  if(r.hotovo)return {stav:"hotovo",bg:"#E4F6EC",pruh:"box-shadow:inset 3px 0 0 var(--ok);",
+  if(r.hotovo)return {stav:"hotovo",bg:"#CDEDDA",pruh:"box-shadow:inset 5px 0 0 var(--ok);",
     band:"background:#1B8A57;color:#fff;font-weight:700"};
-  if(r.reseni)return {stav:r.reseni==="penize"?"vrátí peníze":"vymění",bg:"#FBF0D2",
-    pruh:"box-shadow:inset 3px 0 0 #E0B740;",band:"background:#F4D06F;color:#4A2F0B;font-weight:600"};
-  if(r.odeslano)return {stav:"odesláno",bg:"#FBE0C0",pruh:"box-shadow:inset 3px 0 0 #D9822B;",
+  if(r.reseni)return {stav:r.reseni==="penize"?"vrátí peníze":"vymění",bg:"#F8E3A8",
+    pruh:"box-shadow:inset 5px 0 0 #E0B740;",band:"background:#E0B740;color:#3B2C05;font-weight:700"};
+  if(r.odeslano)return {stav:"odesláno",bg:"#F8CFA4",pruh:"box-shadow:inset 5px 0 0 #D9822B;",
     band:"background:#D9822B;color:#fff;font-weight:700"};
   return {stav:"nová",bg:"#FFFFFF",pruh:"box-shadow:inset 3px 0 0 var(--line);",
     band:"background:#F1F4F8;color:#5A6472;font-weight:600"};
@@ -3218,7 +3262,10 @@ function renderSklad(){
       const jeKrit=kr>0&&ks<=kr, nizko=jeKrit||(mn>0&&ks<=mn);
       if(k.ks!=null&&k.ks!==""){ if(jeKrit)krit++; else if(nizko)doch++; }
       return `<tr${jeKrit?' style="background:#FDE7E4"':(nizko?' style="background:#FEF6F4"':'')}>
-        <td><button class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny" style="font-size:12px;margin-right:4px;vertical-align:-1px">📈</button>${esc(k.nazev)}${k.kodEshop?` <span class="tag">${esc(k.kodEshop)}</span>`:""}${cesteHtml(k.id)}<div style="padding-left:22px">${modelyHtml(k.id)}</div></td>
+        <td><button class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny" style="font-size:12px;margin-right:4px;vertical-align:-1px">📈</button>${esc(k.nazev)}${k.kodEshop?` <span class="tag">${esc(k.kodEshop)}</span>`:""}${cesteHtml(k.id)}
+          ${(k.modely||"").trim()?`<button class="icon-x" data-modely="${k.id}" title="Konkrétní modely skladem" style="font-size:11px">📄</button>`:""}
+          ${(Number(k.ksExt)||0)>0?`<span class="band" style="background:#2C4C86;color:#fff;font-weight:700" title="V externím skladu">ext ${k.ksExt}</span>
+            <button class="btn btn-sm" data-prevez="${k.id}" style="padding:1px 7px;font-size:11px">Přivézt</button>`:""}</td>
         <td class="r">${k.neomezene?'<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700">∞</span>':`<input type="number" class="px" value="${k.ks??""}" data-kf="ks" data-kid="${k.id}" placeholder="—">`}</td>
         <td class="r"><input type="number" class="px" value="${k.min??""}" data-kf="min" data-kid="${k.id}" placeholder="—" ${k.neomezene?"disabled":""}></td>
         <td class="r"><input type="number" class="px" value="${k.krit??""}" data-kf="krit" data-kid="${k.id}" placeholder="—" ${k.neomezene?"disabled":""}></td>
@@ -3239,7 +3286,15 @@ function renderSklad(){
       </tr></thead><tbody>${radky}</tbody></table></div></div>`;
   }
   $("#skBlocks").innerHTML=html||`<div class="card" style="padding:26px;text-align:center;color:var(--ink-3)">${jenDoch?"Nic nedochází — všechny položky jsou nad minimem.":"Zatím nic. Zaškrtni volbu výše a doplň množství."}</div>`;
+  /* Externí sklad je pořád tvoje zboží, jen leží jinde — vedeme ho zvlášť. */
+  let hodExt=0,ksExt=0;
+  for(const arr of Object.values(D.komponenty))for(const k of arr){
+    const q=Number(k.ksExt)||0; if(q>0){ksExt+=q;hodExt+=q*cena(k)}
+  }
   $("#skladSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Hodnota skladu s DPH</div><div class="price">${kc(hod)}</div></div>
+    ${ksExt?`<div><div class="muted" style="font-size:11.5px">Externí sklad</div>
+      <div class="price" style="font-size:20px;color:#2C4C86">${kc(hodExt)}</div>
+      <div class="muted" style="font-size:11.5px">${ksExt} ks</div></div>`:""}
     <div><div class="muted" style="font-size:11.5px">Bez DPH</div><div class="price" style="font-size:20px">${kc(bezDph(hod))}</div></div>
     <div><div class="muted" style="font-size:11.5px">Položek</div><div class="price" style="font-size:20px">${pol}</div></div>
     <div><div class="muted" style="font-size:11.5px">Dochází</div><div class="price" style="font-size:20px;color:${doch?"var(--signal)":"var(--ok)"}">${doch}</div></div>
@@ -3412,7 +3467,7 @@ document.addEventListener("change",e=>{
   if(t.id==="skHledat"){skQ=t.value;renderSklad()}
   if(t.id==="kompHledat"){kompQ=t.value;renderKomp()}
   if(t.id==="sestHledat"){sestQ=t.value;renderSest()}
-  if(t.id==="nkOtev"){renderNakupy()}
+  if(t.id==="nkOtev"||t.id==="nkVratky"){renderNakupy()}
   if(t.id==="nkHledat"){nkQ=t.value;renderNakupy()}
   if(t.id==="nkDodav"){nkDod=t.value;renderNakupy();return}
   if(t.dataset.kinf!==undefined){const k=najdiKomp(t.dataset.kinf);
@@ -3442,6 +3497,8 @@ document.addEventListener("change",e=>{
   if(t.id==="rkOtev"){renderRekl();return}
   if(t.dataset.nvyb!==undefined){const n=D.nakupy.find(x=>x.id===t.dataset.nvyb);
     if(n){n.vyber=t.checked; if(n.vyber){n.dodano=null;n.zaskl=0;n.fakt=null;n.faktCislo=""} renderNakupy();persist();return}}
+  if(t.dataset.next!==undefined){const n=D.nakupy.find(x=>x.id===t.dataset.next);
+    if(n){n.ext=t.checked;persist();return}}
   if(t.dataset.nz!==undefined){const n=D.nakupy.find(x=>x.id===t.dataset.nz);
     if(n){n.zaplaceno=t.checked;renderNakupy();persist();return}}
   if(t.dataset.nv!==undefined){const n=D.nakupy.find(x=>x.id===t.dataset.nv);
@@ -3482,7 +3539,7 @@ document.addEventListener("click",e=>{
   if(t.id==="skHledat"){skQ=t.value;renderSklad()}
   if(t.id==="kompHledat"){kompQ=t.value;renderKomp()}
   if(t.id==="sestHledat"){sestQ=t.value;renderSest()}
-  if(t.id==="nkOtev"){renderNakupy()}
+  if(t.id==="nkOtev"||t.id==="nkVratky"){renderNakupy()}
   if(t.id==="nkHledat"){nkQ=t.value;renderNakupy()}
   if(t.dataset.akt){const k=najdiKomp(t.dataset.id);if(k){k.akt=t.dataset.akt;renderAll()}}
   if(t.dataset.del){for(const[c,a]of Object.entries(D.komponenty)){const i=a.findIndex(k=>k.id===t.dataset.del);if(i>=0){a.splice(i,1);break}}renderAll()}
@@ -3726,6 +3783,7 @@ document.addEventListener("click",e=>{
   if(t.id==="cloudPruhSkryj"){const e=$("#cloudPruh");if(e)e.hidden=true;return}
   if(t.id==="cloudNacti"||t.dataset.cloud==="nacti"){cloudNacti(true);return}
   if(t.id==="cloudUloz"||t.dataset.cloud==="uloz"){cloudUloz();return}
+  if(t.dataset.prevez){prevezZExterniho(t.dataset.prevez);return}
   if(t.id==="cloudVrat"){vratZalohu();return}
   if(t.id==="cloudAuto"){autoNastav(t.checked);renderCloud();
     toast(t.checked?"Automatické ukládání zapnuto":"Automatické ukládání vypnuto");return}
