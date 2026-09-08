@@ -1104,7 +1104,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=136;
+const VERZE=137;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1220,7 +1220,13 @@ async function cloudUloz(tiche){
         try{vzdalena=JSON.parse(zBase64(gj.content))}catch(e){}
         const kdo=vzdalena&&vzdalena.ulozenoKym?vzdalena.ulozenoKym:"jiné zařízení";
         const kdy=vzdalena&&vzdalena.ulozenoKdy?new Date(vzdalena.ulozenoKdy).toLocaleString("cs-CZ"):"neznámo kdy";
-        if(tiche){toast("Automatické uložení zastaveno — v cloudu je novější verze");return}
+        if(tiche){cloudCizi=true;
+          const el=$("#cloudPruh");
+          if(el){$("#cloudPruhText").textContent=
+            "Automatické ukládání je zastavené — v cloudu je novější uložení ("
+            +kdo+", "+kdy+"). Tady máš "+popisDat(D)+".";
+            el.hidden=false}
+          return}
         if(!confirm(
           `V cloudu je novější uložení, než jaké máš načtené.\n\n`
           +`V CLOUDU  ${kdo}, ${kdy}\n   ${vzdalena?popisDat(vzdalena):"nepodařilo se přečíst"}\n\n`
@@ -1275,10 +1281,12 @@ const autoZap=()=>{try{return localStorage.getItem("bestcomp-auto")!=="0"}catch(
 const autoNastav=v=>{try{localStorage.setItem("bestcomp-auto",v?"1":"0")}catch(e){}};
 function naplanujAutoUlozeni(){
   if(!autoZap()||!cloudOk())return;
+  if(cloudCizi){zkontrolujCloudPriStartu();return}   // radši znovu ověřit než přepsat
   clearTimeout(autoCas);
   autoCas=setTimeout(()=>{ if(cloudZmena&&!cloudBezi)cloudUloz(true) },60000);
 }
 /* Při startu se podíváme, jestli v cloudu neleží novější uložení z jiného zařízení. */
+let cloudCizi=false;
 async function zkontrolujCloudPriStartu(){
   if(!cloudOk())return;
   try{
@@ -1288,13 +1296,15 @@ async function zkontrolujCloudPriStartu(){
     /* Vlastní uložení z tohohle zařízení není důvod k poplachu. */
     const cizi=v.ulozenoKdy&&(!D.ulozenoKdy||v.ulozenoKdy>D.ulozenoKdy)
       &&!(v.ulozenoKym===zarizeni()&&v.ulozenoKdy===D.ulozenoKdy);
+    cloudCizi=!!cizi;
     if(cizi){
+      clearTimeout(autoCas);            // dokud se to nevyřeší, automat mlčí
       const el=$("#cloudPruh"); if(!el)return;
       $("#cloudPruhText").textContent=
         `V cloudu je novější uložení — ${v.ulozenoKym||"jiné zařízení"}, `
         +`${new Date(v.ulozenoKdy).toLocaleString("cs-CZ")}. Tady máš ${popisDat(D)}.`;
       el.hidden=false;
-    }else{ cloudSha=j.sha; }
+    }else{ cloudSha=j.sha; const el=$("#cloudPruh"); if(el)el.hidden=true; }
   }catch(e){}
 }
 function renderCloud(){
@@ -3806,6 +3816,10 @@ renderAll();
 zkontrolujVerzi();
 setInterval(zkontrolujVerzi,600000);
 zkontrolujCloudPriStartu();
+/* Zapomenuté okno se musí samo dozvědět, že jinde vznikla novější verze. */
+setInterval(zkontrolujCloudPriStartu,120000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden)zkontrolujCloudPriStartu() });
+window.addEventListener("focus",zkontrolujCloudPriStartu);
 
 if(!canStore)toast("Prohlížeč neukládá data — po zavření použij Uložit data");
 </script>
