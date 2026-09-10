@@ -1125,7 +1125,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=143;
+const VERZE=144;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1361,7 +1361,29 @@ function sestavCenik(){
       neomezene:!!k.neomezene,socket:k.socket||"",
       modely:(k.modely||"").replace(/\s*\([^)]*K[čc][^)]*\)/g,"").trim()});
   }
+  /* Sestavy s cenou, kterou má základní varianta na e-shopu — ne s přepočtem,
+     zákazníkovi se musí říct přesně to, co u produktu reálně zaplatí. */
+  const sest=[];
+  for(const s of D.sestavy){
+    const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
+    if(!kody.length)continue;
+    const V=varianty(s);
+    const spocteno=V.length?Math.min(...V.map(v=>v.cenaProdej)):null;
+    const eshop=(s.excel!=null&&s.excel!=="")?Number(s.excel):spocteno;
+    sest.push({id:s.id,nazev:s.nazev,hlavniKod:s.hlavniKod||kody[0],kod:s.kod,
+      url:s.url||"",cena:eshop,vyber:s.vyber||{},
+      vyp:Object.keys(s.vyp||{}).filter(i=>s.vyp[i])});
+  }
+  /* Příplatky s konečnou cenou, opět tou, kterou zákazník vidí u produktu. */
+  const pripl=[];
+  for(const p of D.priplatky){
+    const c=surPlati(p);
+    if(c==null)continue;
+    pripl.push({id:p.id,nazev:p.eshop||p.nazev,param:paramPriplatku(p),
+      from:p.from||null,to:p.to,cena:Math.round(c)});
+  }
   return {verze:VERZE,datum:new Date().toISOString(),zdroj:zarizeni(),
+    sestavy:sest,priplatky:pripl,
     nastaveni:{vat:D.nastaveni.vat,prace:D.nastaveni.prace,windows:D.nastaveni.windows,
       marzePriplatek:D.nastaveni.marzePriplatek},
     pasma:D.pasma,pasmaPriplatku:D.pasmaPriplatku,skrine:D.skrine,
