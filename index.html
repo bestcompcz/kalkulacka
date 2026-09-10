@@ -1125,7 +1125,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=142;
+const VERZE=143;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1388,11 +1388,14 @@ async function publikujCenik(tiche){
   if(!c2.cenikRepo||!c2.cenikHeslo)return;
   try{
     const sifra=await zasifruj(txt,c2.cenikHeslo);
-    const url=`https://api.github.com/repos/${c2.cenikRepo}/contents/cenik.enc`;
+    /* Přípona .json je důležitá — soubor s .enc servíruje GitHub jako binární data
+       a text z něj pak nejde přečíst. */
+    const url=`https://api.github.com/repos/${c2.cenikRepo}/contents/cenik-sifrovany.json`;
     let sha=null;
     const g=await ghFetch(url);
     if(g.ok){const j=await g.json();sha=j.sha}
-    const telo={message:"ceník v"+VERZE,content:doBase64(sifra)};
+    const telo={message:"ceník v"+VERZE,
+      content:doBase64(JSON.stringify({verze:VERZE,datum:new Date().toISOString(),enc:sifra}))};
     if(sha)telo.sha=sha;
     const r=await ghFetch(url,{method:"PUT",body:JSON.stringify(telo)});
     if(!r.ok){ if(!tiche)toast("Zašifrovaný ceník se nepodařilo publikovat ("+r.status+")"); return }
