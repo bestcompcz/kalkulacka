@@ -1125,7 +1125,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=145;
+const VERZE=146;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4016,7 +4016,13 @@ document.addEventListener("click",e=>{
 });
 $("#file").onchange=e=>{const f=e.target.files[0];if(!f)return;
   const rd=new FileReader();
-  rd.onload=()=>{try{zalohujPredPrepsanim("načtení souboru");D=oprav(JSON.parse(rd.result));renderAll();toast("Data načtena")}
+  rd.onload=()=>{try{zalohujPredPrepsanim("načtení souboru");D=oprav(JSON.parse(rd.result));
+    /* Ručně načtený soubor je vždycky to, co má platit — nese si ale razítko z doby,
+       kdy vznikl, takže by ho cloud přebil. Přerazítkujeme ho na teď. */
+    D.ulozenoKdy=new Date().toISOString(); D.ulozenoKym=zarizeni()+" · ze souboru";
+    cloudSha=null; cloudCizi=false;
+    const pr=$("#cloudPruh"); if(pr)pr.hidden=true;
+    renderAll();toast("Data načtena ze souboru — ulož je do cloudu")}
     catch(err){toast("Soubor se nepodařilo přečíst")}};
   rd.readAsText(f);e.target.value="";};
 
