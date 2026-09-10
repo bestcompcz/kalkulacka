@@ -510,6 +510,18 @@ tr.unused td{background:#FEFCFB}
         <label class="row" style="gap:6px;font-size:12.5px;cursor:pointer">
           <input type="checkbox" id="cloudAuto" style="width:auto"> ukládat automaticky minutu po změně</label>
       </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <strong style="font-size:13px">Ceník pro nacenění</strong>
+        <p class="hint" style="margin:4px 0 8px">Zúžený výtah cen komponent se publikuje spolu s daty do repozitáře.
+          Když sem vložíš klasický token s právem <em>gist</em>, uloží se navíc pod tajný odkaz,
+          který jde přečíst z libovolného zařízení — i z mobilu.</p>
+        <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div><div class="muted" style="font-size:11.5px">Token pro tajný odkaz</div>
+            <input type="password" id="cenikToken" placeholder="ghp_… (scope gist)" style="width:230px"></div>
+          <button class="btn btn-sm" id="cenikPublikuj">Publikovat ceník teď</button>
+        </div>
+        <div id="cenikStav" style="margin-top:8px"></div>
+      </div>
       <p class="hint" style="margin:10px 0 0">Token zůstává jen v tomhle prohlížeči, do dat se neukládá —
         na každém zařízení ho zadáš jednou. Repozitář a soubor se synchronizují spolu s daty.<br>
         <strong>Před prací dej Načíst, po práci Uložit.</strong> Když mezitím uložilo jiné zařízení,
@@ -1110,7 +1122,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=139;
+const VERZE=140;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1258,6 +1270,7 @@ async function cloudUloz(tiche){
     cloudSha=j.content&&j.content.sha; cloudKdy=new Date().toISOString(); cloudZmena=false;
     ulozLokalne();               // razítko o uložení musí přežít i obnovení stránky
     renderCloud();
+    publikujCenik(tiche);        // ceník se publikuje spolu s daty, ať se na to nemusí myslet
     if(!tiche)toast("Uloženo do cloudu");
   }catch(e){toast("Uložení selhalo: "+e.message)}
   finally{cloudBezi=false; renderCloud()}
@@ -1325,6 +1338,66 @@ function prevezZExterniho(id){
   k.ksExt=ext-q; k.ks=(Number(k.ks)||0)+q;
   renderAll(); toast(`${q}× ${k.nazev} převezeno do hlavního skladu`);
 }
+
+/* ======== publikace ceníku ========
+   Zúžený výtah jen s tím, co je potřeba k nacenění individuální sestavy.
+   Publikuje se dvakrát: do privátního repozitáře pro pořádek a volitelně
+   do tajného Gistu, který jde přečíst z libovolného zařízení přes adresu. */
+const GIST_TOKEN_KEY="bestcomp-gh-token-gist";
+const gistToken=()=>{try{return localStorage.getItem(GIST_TOKEN_KEY)||""}catch(e){return ""}};
+const gistNastav=t=>{try{t?localStorage.setItem(GIST_TOKEN_KEY,t):localStorage.removeItem(GIST_TOKEN_KEY)}catch(e){}};
+function sestavCenik(){
+  const komp=[];
+  for(const[kat,arr]of Object.entries(D.komponenty))for(const k of arr){
+    /* Do ceníku jde jediná cena, ta použitá do výpočtu. Skladová, reprodukční
+       ani dodavatel tam nepatří — z těch by šlo odvodit, kde a za kolik nakupuješ.
+       Z popisu modelů se ceny v závorkách vyřežou. */
+    komp.push({kategorie:kat,id:k.id,nazev:k.nazev,
+      cena:Math.round(cena(k)),
+      ks:k.neomezene?null:(Number(k.ks)||0),ksExt:Number(k.ksExt)||0,
+      neomezene:!!k.neomezene,socket:k.socket||"",
+      modely:(k.modely||"").replace(/\s*\([^)]*K[čc][^)]*\)/g,"").trim()});
+  }
+  return {verze:VERZE,datum:new Date().toISOString(),zdroj:zarizeni(),
+    nastaveni:{vat:D.nastaveni.vat,prace:D.nastaveni.prace,windows:D.nastaveni.windows,
+      marzePriplatek:D.nastaveni.marzePriplatek},
+    pasma:D.pasma,pasmaPriplatku:D.pasmaPriplatku,skrine:D.skrine,
+    komponenty:komp};
+}
+async function publikujCenik(tiche){
+  if(!cloudOk())return;
+  const txt=JSON.stringify(sestavCenik(),null,1);
+  /* 1 · do privátního repozitáře vedle dat */
+  try{
+    const c=D.cloud||{};
+    const url=`https://api.github.com/repos/${c.repo}/contents/cenik.json`;
+    let sha=null;
+    const g=await ghFetch(url);
+    if(g.ok){const j=await g.json();sha=j.sha}
+    const telo={message:"ceník v"+VERZE+" · "+zarizeni(),content:doBase64(txt)};
+    if(sha)telo.sha=sha;
+    const r=await ghFetch(url,{method:"PUT",body:JSON.stringify(telo)});
+    if(!r.ok&&!tiche)toast("Ceník se nepodařilo uložit do repozitáře ("+r.status+")");
+  }catch(e){ if(!tiche)toast("Ceník: "+e.message) }
+  /* 2 · do tajného Gistu, pokud je nastavený */
+  const tok=gistToken();
+  if(!tok)return;
+  try{
+    const hl={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json",
+      "Content-Type":"application/json"};
+    const telo={description:"BestComp ceník",public:false,
+      files:{"cenik.json":{content:txt}}};
+    const id=(D.cloud||{}).cenikGist;
+    const r=await fetch(id?"https://api.github.com/gists/"+id:"https://api.github.com/gists",
+      {method:id?"PATCH":"POST",headers:hl,body:JSON.stringify(telo)});
+    if(!r.ok){ if(!tiche)toast("Ceník se do tajného odkazu nepodařilo uložit ("+r.status+")"); return }
+    const j=await r.json();
+    if(!id){ D.cloud.cenikGist=j.id; D.cloud.cenikUrl=
+      `https://gist.githubusercontent.com/${j.owner&&j.owner.login}/${j.id}/raw/cenik.json`;
+      ulozLokalne(); renderCloud(); }
+  }catch(e){ if(!tiche)toast("Tajný odkaz: "+e.message) }
+}
+
 function renderCloud(){
   /* Tečka v horní liště: zelená uloženo, červená neuložené změny, šedá bez spojení. */
   const tec=$("#cloudTecka");
@@ -1345,6 +1418,16 @@ function renderCloud(){
   if(pt&&document.activeElement!==pt)pt.value=(D.cloud&&D.cloud.path)||"data.json";
   if(tk&&document.activeElement!==tk)tk.value=ghToken();
   const au=$("#cloudAuto"); if(au)au.checked=autoZap();
+  const ct=$("#cenikToken");
+  if(ct&&document.activeElement!==ct)ct.value=gistToken();
+  const cs=$("#cenikStav");
+  if(cs){
+    const u=(D.cloud||{}).cenikUrl;
+    cs.innerHTML=u
+      ?`<div class="muted" style="font-size:11.5px">Tajný odkaz na ceník — vlož ho do instrukcí projektu</div>
+        <input type="text" readonly value="${esc(u)}" onclick="this.select()" style="width:100%;font-family:var(--mono);font-size:11.5px">`
+      :`<span class="muted" style="font-size:11.5px">Tajný odkaz zatím není. Vlož token a dej Publikovat ceník.</span>`;
+  }
   const zr=$("#cloudZarizeni");
   if(zr&&document.activeElement!==zr)zr.value=(()=>{try{return localStorage.getItem(ZARIZENI_KEY)||""}catch(e){return ""}})();
   const c=D.cloud||{};
@@ -3372,6 +3455,7 @@ document.addEventListener("input",e=>{
   if(t.id==="cloudPath"){D.cloud.path=t.value.trim()||"data.json";persist();renderCloud();return}
   if(t.id==="cloudToken"){ghNastav(t.value.trim());renderCloud();return}
   if(t.id==="cloudZarizeni"){zarizeniNastav(t.value.trim());renderCloud();return}
+  if(t.id==="cenikToken"){gistNastav(t.value.trim());renderCloud();return}
   if(t.id==="rkHledat"){rkQ=t.value;renderRekl();return}
   if(t.dataset.fi!==undefined&&t.dataset.ff&&fakturaCache){
     const x=fakturaCache.pol[Number(t.dataset.fi)];
@@ -3791,6 +3875,7 @@ document.addEventListener("click",e=>{
   if(t.id==="cloudUloz"||t.dataset.cloud==="uloz"){cloudUloz();return}
   if(t.dataset.prevez){prevezZExterniho(t.dataset.prevez);return}
   if(t.id==="cloudVrat"){vratZalohu();return}
+  if(t.id==="cenikPublikuj"){publikujCenik().then(()=>{renderCloud();toast("Ceník publikován")});return}
   if(t.id==="cloudAuto"){autoNastav(t.checked);renderCloud();
     toast(t.checked?"Automatické ukládání zapnuto":"Automatické ukládání vypnuto");return}
   if(t.id==="cloudZapomen"){ghNastav("");const e=$("#cloudToken");if(e)e.value="";renderCloud();toast("Token smazán z tohoto zařízení");return}
