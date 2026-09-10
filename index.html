@@ -347,7 +347,8 @@ tr.unused td{background:#FEFCFB}
     <button class="btn btn-sm" id="addBuild">Přidat sestavu</button>
     <button class="btn btn-sm" id="expBuilds">Přehled CSV</button>
     <button class="btn btn-sm btn-primary" id="expShoptet" title="Stáhne CSV, které pak importuješ v Shoptetu">Stáhnout příplatky ↓ pro Shoptet</button>
-    <button class="btn btn-sm" id="expCeny" title="Stáhne CSV, které pak importuješ v Shoptetu">Stáhnout ceny ↓ pro Shoptet</button>
+    <button class="btn btn-sm btn-primary" id="zmenyCen" title="Ukáže, které sestavy mění cenu proti e-shopu">Změny cen ↓</button>
+    <button class="btn btn-sm" id="expCeny" title="Stáhne CSV se všemi sestavami">Všechny ceny ↓</button>
     <button class="btn btn-sm" id="expNavod" title="Jak na export">?</button>
     <button class="btn btn-sm" id="impCeny" title="Načte export produktů ze Shoptetu do kalkulačky">Načíst ↑ z e-shopu do kalkulačky</button>
     <input type="file" id="cenyFile" accept=".csv,text/csv" style="display:none">
@@ -1125,7 +1126,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=146;
+const VERZE=147;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1467,6 +1468,57 @@ async function zasifruj(txt,heslo){
   vse.set(sul,0); vse.set(iv,sul.length); vse.set(sifra,sul.length+iv.length);
   let bin=""; for(const b of vse)bin+=String.fromCharCode(b);
   return btoa(bin);
+}
+
+
+/* ======== náhled změn cen proti e-shopu ========
+   Porovná spočítanou cenu základní varianty s cenou, kterou má produkt
+   na e-shopu. Bez toho by se ceny exportovaly naslepo. */
+let cenyCache=null;
+function zmenyCen(){
+  const out=[];
+  for(const s of D.sestavy){
+    const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
+    if(!kody.length)continue;
+    const V=varianty(s); if(!V.length)continue;
+    const nova=Math.min(...V.map(v=>v.cenaProdej));
+    const stara=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
+    if(stara===null||nova!==stara)out.push({s,kody,stara,nova,drzena:s.drzena!=null});
+  }
+  return out.sort((a,b)=>Math.abs((b.nova-(b.stara??b.nova)))-Math.abs((a.nova-(a.stara??a.nova))));
+}
+function zobrazZmenyCen(){
+  const L=zmenyCen();
+  if(!L.length){toast("Žádná sestava nemění cenu proti e-shopu");return}
+  cenyCache=L;
+  $("#mTitle").textContent=`Ceny na e-shop — ${L.length} sestav se liší`;
+  $("#mBody").innerHTML=`
+    <p class="hint" style="margin:0 0 8px">Porovnáno se cenou, kterou má produkt na e-shopu.
+      Zaškrtnuté půjdou do CSV. Odškrtnutá sestava si drží cenu, kterou má, a příště přijde
+      odškrtnutá s poznámkou.</p>
+    <table><thead><tr><th style="width:34px"></th><th>Sestava</th><th style="width:96px">Kód</th>
+      <th class="r" style="width:96px">Na e-shopu</th><th class="r" style="width:96px">Nově</th>
+      <th class="r" style="width:88px">Rozdíl</th><th style="width:110px">Level</th></tr></thead><tbody>
+    ${L.map((x,i)=>{
+      const r=x.stara===null?null:x.nova-x.stara;
+      const lvlStary=(x.s.kategorie||[]).find(jeLevel);
+      const lvlNovy=LEVELY.find(([lim])=>x.nova<=lim)[1];
+      const zmenaLvl=lvlStary&&lvlStary!==lvlNovy;
+      return `<tr style="background:${x.drzena?"#FDE7E4":r===null?"#FFF8E1":"#FFFFFF"}">
+      <td class="r"><input type="checkbox" ${x.drzena?"":"checked"} data-cz="${i}" style="width:auto;cursor:pointer"></td>
+      <td><strong>${esc(x.s.nazev)}</strong>${x.drzena?' <span class="band" style="background:#C0392B;color:#fff;font-weight:700">držená cena</span>':""}</td>
+      <td style="font-size:11.5px">${esc(x.kody[0])}</td>
+      <td class="r num">${x.stara===null?"—":kc(x.stara)}</td>
+      <td class="r num" style="font-weight:600">${kc(x.nova)}</td>
+      <td class="r num" style="color:${r===null?"var(--ink-3)":r>0?"var(--bad)":"var(--ok)"}">${r===null?"neznámá":(r>0?"+":"")+r}</td>
+      <td style="font-size:11px">${zmenaLvl?`<span class="band" style="background:#E0B740;color:#3B2C05;font-weight:700">mění se</span>`:"beze změny"}</td></tr>`}).join("")}
+    </tbody></table>
+    <p class="hint" style="margin:10px 0 0">Sestavy se žlutým pozadím nemají načtenou cenu z e-shopu —
+      dej <em>Načíst ↑ z e-shopu do kalkulačky</em>, ať je s čím porovnávat.</p>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn btn-sm" id="czZrus">Zrušit</button>
+      <button class="btn btn-sm btn-primary" id="czOk">Stáhnout CSV za zaškrtnuté</button></div>`;
+  modalKomp=null; $("#modal").hidden=false;
 }
 
 function renderCloud(){
@@ -3718,6 +3770,56 @@ document.addEventListener("click",e=>{
       +`cena ${kc(c.prodej)}\n\nNa e-shopu produkt zůstane, smaže se jen tady. Vrátit to nejde.`)){
       D.sestavy=D.sestavy.filter(x=>x.id!==t.dataset.dels);renderSest();persist();
       toast("Sestava smazána")}}
+  if(t.id==="zmenyCen"){zobrazZmenyCen();return}
+  if(t.id==="czZrus"){cenyCache=null;$("#modal").hidden=true;return}
+  if(t.id==="czOk"){
+    if(!cenyCache)return;
+    const vyb=[],drz=[];
+    for(let i=0;i<cenyCache.length;i++){
+      const ch=$(`[data-cz="${i}"]`);
+      if(ch&&ch.checked)vyb.push(cenyCache[i]); else drz.push(cenyCache[i]);
+    }
+    for(const x of drz)if(x.stara!==null)x.s.drzena=x.stara;   // odškrtnutá si drží cenu z e-shopu
+    if(!vyb.length){cenyCache=null;$("#modal").hidden=true;renderSest();persist();
+      toast("Nic nezaškrtnuto, ceny drží");return}
+    const rows=[["code","pairCode","price"]];
+    const rowsK=[]; let lvl=0, KATmax=0;
+    for(const x of vyb){
+      const c=spocti(x.s), base=x.s.vyber["Skříň"], H=D.skrine.hodnoty;
+      const novyLvl=LEVELY.find(([lim])=>x.nova<=lim)[1];
+      const staryLvl=(x.s.kategorie||[]).find(jeLevel);
+      const zmenaLvl=!!staryLvl&&staryLvl!==novyLvl;
+      for(const kod of x.kody){
+        const suf=kod.includes("/")?kod.split("/")[1]:null;
+        let skr=null;
+        if(suf&&SUF[suf])for(const a of Object.values(D.komponenty))for(const k of a)if(k.nazev===SUF[suf])skr=k;
+        let p=0;
+        if(skr&&base&&skr.id!==base){const q=Number(H[skr.id]),w=Number(H[base]);if(isFinite(q)&&isFinite(w))p=q-w}
+        if(skr&&maDeskuProModul(x.s)){
+          const e=Number(D.skrine.extra.castka)||0;
+          if(D.skrine.extra.skrine[skr.id])p+=e;
+          if(base&&D.skrine.extra.skrine[base])p-=e;
+        }
+        rows.push([kod,pairProKod(kod,x.s),String(Math.round(c.prodej+p))]);
+        if(zmenaLvl&&(x.s.kategorie||[]).length){
+          const kat=x.s.kategorie.map(y=>jeLevel(y)?novyLvl:y);
+          rowsK.push([kod,pairProKod(kod,x.s),...kat]);
+          if(kat.length>KATmax)KATmax=kat.length;
+        }
+      }
+      if(zmenaLvl)lvl++;
+      x.s.drzena=null;
+    }
+    const kody=vyb.map(x=>x.kody[0].split("/")[0]).join("-").slice(0,40);
+    dl(`shoptet-ceny-${dnes()}-${vyb.length}sestav-${rows.length-1}variant-${kody}.csv`,csv(rows),"text/csv");
+    if(rowsK.length){
+      const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
+      dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
+        csv([["code","pairCode",...cols],...rowsK.map(r=>[r[0],r[1],...cols.map((_,i)=>r[2+i]||"")])]),"text/csv");
+    }
+    cenyCache=null;$("#modal").hidden=true;renderSest();persist();
+    toast(`${rows.length-1} variant`+(lvl?` · ${lvl} mění level, kategorie zvlášť`:"")+(drz.length?` · ${drz.length} drží cenu`:""));
+    return}
   if(t.id==="expNavod"){
     $("#mTitle").textContent="Jak exportovat na e-shop";
     $("#mBody").innerHTML=`
