@@ -513,11 +513,14 @@ tr.unused td{background:#FEFCFB}
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
         <strong style="font-size:13px">Ceník pro nacenění</strong>
         <p class="hint" style="margin:4px 0 8px">Zúžený výtah cen komponent se publikuje spolu s daty do repozitáře.
-          Když sem vložíš adresu vlastního skriptu, pošle se navíc tam — odtud si ho přečte
-          Claude při naceňování, z libovolného zařízení.</p>
+          Když vyplníš veřejný repozitář a heslo, publikuje se navíc <strong>zašifrovaný</strong>
+          jako <code>cenik.enc</code>. Bez hesla je to nečitelná změť, s heslem si ho Claude
+          přečte při naceňování z libovolného zařízení.</p>
         <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div style="flex:1;min-width:260px"><div class="muted" style="font-size:11.5px">Adresa pro publikaci (Apps Script)</div>
-            <input type="text" id="cenikPost" placeholder="https://script.google.com/macros/s/…/exec?k=heslo" style="width:100%"></div>
+          <div><div class="muted" style="font-size:11.5px">Veřejný repozitář</div>
+            <input type="text" id="cenikRepo" placeholder="bestcompcz/kalkulacka" style="width:200px"></div>
+          <div><div class="muted" style="font-size:11.5px">Heslo k šifrování</div>
+            <input type="text" id="cenikHeslo" placeholder="dlouhé a náhodné" style="width:200px"></div>
           <button class="btn btn-sm" id="cenikPublikuj">Publikovat ceník teď</button>
         </div>
         <div id="cenikStav" style="margin-top:8px"></div>
@@ -1122,7 +1125,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=141;
+const VERZE=142;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1379,15 +1382,37 @@ async function publikujCenik(tiche){
     const r=await ghFetch(url,{method:"PUT",body:JSON.stringify(telo)});
     if(!r.ok&&!tiche)toast("Ceník se nepodařilo uložit do repozitáře ("+r.status+")");
   }catch(e){ if(!tiche)toast("Ceník: "+e.message) }
-  /* 2 · na vlastní adresu, odkud si ceník přečte Claude z libovolného zařízení.
-     Odpověď číst nepotřebujeme, proto no-cors — prohlížeč by ji stejně nepustil. */
-  const url=(D.cloud||{}).cenikPost;
-  if(!url)return;
+  /* 2 · zašifrovaný na veřejnou adresu. Soubor je čitelný komukoli, ale bez hesla
+     je to nesmysl — a heslo zná jen kalkulačka a projekt, kde se nacenňuje. */
+  const c2=D.cloud||{};
+  if(!c2.cenikRepo||!c2.cenikHeslo)return;
   try{
-    await fetch(url,{method:"POST",mode:"no-cors",
-      headers:{"Content-Type":"text/plain;charset=utf-8"},body:txt});
+    const sifra=await zasifruj(txt,c2.cenikHeslo);
+    const url=`https://api.github.com/repos/${c2.cenikRepo}/contents/cenik.enc`;
+    let sha=null;
+    const g=await ghFetch(url);
+    if(g.ok){const j=await g.json();sha=j.sha}
+    const telo={message:"ceník v"+VERZE,content:doBase64(sifra)};
+    if(sha)telo.sha=sha;
+    const r=await ghFetch(url,{method:"PUT",body:JSON.stringify(telo)});
+    if(!r.ok){ if(!tiche)toast("Zašifrovaný ceník se nepodařilo publikovat ("+r.status+")"); return }
     D.cloud.cenikKdy=new Date().toISOString(); ulozLokalne(); renderCloud();
   }catch(e){ if(!tiche)toast("Publikace ceníku: "+e.message) }
+}
+/* AES-GCM s klíčem odvozeným z hesla. Výstup je base64: sůl, vektor, šifra. */
+async function zasifruj(txt,heslo){
+  const enc=new TextEncoder();
+  const sul=crypto.getRandomValues(new Uint8Array(16));
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const zaklad=await crypto.subtle.importKey("raw",enc.encode(heslo),"PBKDF2",false,["deriveKey"]);
+  const klic=await crypto.subtle.deriveKey(
+    {name:"PBKDF2",salt:sul,iterations:200000,hash:"SHA-256"},
+    zaklad,{name:"AES-GCM",length:256},false,["encrypt"]);
+  const sifra=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},klic,enc.encode(txt)));
+  const vse=new Uint8Array(sul.length+iv.length+sifra.length);
+  vse.set(sul,0); vse.set(iv,sul.length); vse.set(sifra,sul.length+iv.length);
+  let bin=""; for(const b of vse)bin+=String.fromCharCode(b);
+  return btoa(bin);
 }
 
 function renderCloud(){
@@ -1410,8 +1435,8 @@ function renderCloud(){
   if(pt&&document.activeElement!==pt)pt.value=(D.cloud&&D.cloud.path)||"data.json";
   if(tk&&document.activeElement!==tk)tk.value=ghToken();
   const au=$("#cloudAuto"); if(au)au.checked=autoZap();
-  const ct=$("#cenikPost");
-  if(ct&&document.activeElement!==ct)ct.value=(D.cloud||{}).cenikPost||"";
+  const cr=$("#cenikRepo"); if(cr&&document.activeElement!==cr)cr.value=(D.cloud||{}).cenikRepo||"";
+  const ch=$("#cenikHeslo"); if(ch&&document.activeElement!==ch)ch.value=(D.cloud||{}).cenikHeslo||"";
   const cs=$("#cenikStav");
   if(cs){
     const kdy=(D.cloud||{}).cenikKdy;
@@ -3446,7 +3471,8 @@ document.addEventListener("input",e=>{
   if(t.id==="cloudPath"){D.cloud.path=t.value.trim()||"data.json";persist();renderCloud();return}
   if(t.id==="cloudToken"){ghNastav(t.value.trim());renderCloud();return}
   if(t.id==="cloudZarizeni"){zarizeniNastav(t.value.trim());renderCloud();return}
-  if(t.id==="cenikPost"){D.cloud.cenikPost=t.value.trim();persist();renderCloud();return}
+  if(t.id==="cenikRepo"){D.cloud.cenikRepo=t.value.trim();persist();return}
+  if(t.id==="cenikHeslo"){D.cloud.cenikHeslo=t.value.trim();persist();return}
   if(t.id==="rkHledat"){rkQ=t.value;renderRekl();return}
   if(t.dataset.fi!==undefined&&t.dataset.ff&&fakturaCache){
     const x=fakturaCache.pol[Number(t.dataset.fi)];
