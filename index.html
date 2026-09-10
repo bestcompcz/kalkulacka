@@ -1125,7 +1125,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=144;
+const VERZE=145;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1382,6 +1382,10 @@ function sestavCenik(){
     pripl.push({id:p.id,nazev:p.eshop||p.nazev,param:paramPriplatku(p),
       from:p.from||null,to:p.to,cena:Math.round(c)});
   }
+  /* Pevné pořadí podle id — jinak by se otisk lišil i při stejných cenách
+     a ceník by se publikoval pořád dokola. */
+  const podleId=(a,b)=>String(a.id).localeCompare(String(b.id));
+  komp.sort(podleId); sest.sort(podleId); pripl.sort(podleId);
   return {verze:VERZE,datum:new Date().toISOString(),zdroj:zarizeni(),
     sestavy:sest,priplatky:pripl,
     nastaveni:{vat:D.nastaveni.vat,prace:D.nastaveni.prace,windows:D.nastaveni.windows,
@@ -1389,9 +1393,31 @@ function sestavCenik(){
     pasma:D.pasma,pasmaPriplatku:D.pasmaPriplatku,skrine:D.skrine,
     komponenty:komp};
 }
+const HASH_KEY="bestcomp-cenik-hash";
+const PUBL_KEY="bestcomp-cenik-publikovano";
+/* Otisk se počítá z otevřeného objektu, nikdy ze zašifrovaného souboru —
+   sůl a vektor jsou pokaždé jiné, takže by se šifra neshodovala sama se sebou.
+   Datum a zdroj se vyhazují, ty se mění pokaždé a o cenách nic neříkají. */
+async function otiskCeniku(o){
+  const kopie=Object.assign({},o); delete kopie.datum; delete kopie.zdroj;
+  const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(kopie)));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
 async function publikujCenik(tiche){
   if(!cloudOk())return;
-  const txt=JSON.stringify(sestavCenik(),null,1);
+  const objekt=sestavCenik();
+  const hash=await otiskCeniku(objekt);
+  let stary="",kdyPubl=0;
+  try{stary=localStorage.getItem(HASH_KEY)||"";kdyPubl=Number(localStorage.getItem(PUBL_KEY)||0)}catch(e){}
+  const zmena=hash!==stary;
+  const stare=!kdyPubl||(Date.now()-kdyPubl)>7*24*3600*1000;
+  if(!zmena&&!stare){
+    console.log("ceník beze změny, nepublikováno");
+    if(!tiche)toast("Ceník beze změny, nepublikováno");
+    return;
+  }
+  const duvod=zmena?"změna dat":"týdenní obnova";
+  const txt=JSON.stringify(objekt,null,1);
   /* 1 · do privátního repozitáře vedle dat */
   try{
     const c=D.cloud||{};
@@ -1422,6 +1448,9 @@ async function publikujCenik(tiche){
     const r=await ghFetch(url,{method:"PUT",body:JSON.stringify(telo)});
     if(!r.ok){ if(!tiche)toast("Zašifrovaný ceník se nepodařilo publikovat ("+r.status+")"); return }
     D.cloud.cenikKdy=new Date().toISOString(); ulozLokalne(); renderCloud();
+    try{localStorage.setItem(HASH_KEY,hash);localStorage.setItem(PUBL_KEY,String(Date.now()))}catch(e){}
+    console.log("ceník publikován — "+duvod);
+    if(!tiche)toast("Ceník publikován — "+duvod);
   }catch(e){ if(!tiche)toast("Publikace ceníku: "+e.message) }
 }
 /* AES-GCM s klíčem odvozeným z hesla. Výstup je base64: sůl, vektor, šifra. */
