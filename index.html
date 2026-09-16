@@ -1126,7 +1126,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=148;
+const VERZE=149;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4146,8 +4146,20 @@ const r=x=>Math.round(x);
 const csv=rows=>"\uFEFF"+rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";")).join("\n");
 const dnes=()=>new Date().toISOString().slice(0,10);
 const bezDiakritiky=t=>String(t).normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"").toLowerCase();
-function dl(name,text,mime){const b=new Blob([text],{type:mime+";charset=utf-8"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;a.click();URL.revokeObjectURL(a.href)}
+/* Stahování po jednom s odstupem. Dva soubory spuštěné v jednom okamžiku
+   prohlížeč nestihne — druhý zůstane viset jako nedokončený. A odkaz na data
+   se nesmí uvolnit hned, jinak se stahování přeruší dřív, než začne. */
+let dlFronta=Promise.resolve();
+function dl(name,text,mime){
+  dlFronta=dlFronta.then(()=>new Promise(hotovo=>{
+    const b=new Blob([text],{type:mime+";charset=utf-8"});
+    const url=URL.createObjectURL(b);
+    const a=document.createElement("a");
+    a.href=url; a.download=name; a.style.display="none";
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{a.remove();URL.revokeObjectURL(url);hotovo()},1200);
+  }));
+}
 
 /* ================= start ================= */
 D=restore()||fresh();
