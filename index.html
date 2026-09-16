@@ -1134,7 +1134,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=151;
+const VERZE=152;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1484,6 +1484,25 @@ async function zasifruj(txt,heslo){
    na e-shopu. Bez toho by se ceny exportovaly naslepo. */
 let cenyCache=null;
 /* Ke skříni najde kód varianty — přípona kódu je klíč do převodníku skříní. */
+/* Ke kódu varianty najde skutečnou skříň. Převodník přípon platí jen tehdy,
+   když ta skříň u sestavy opravdu existuje — u 446 znamená BL Fractal North Black,
+   ne Montech X3 Black, a počítat cenu podle převodníku by ji posunulo o rozdíl skříní. */
+function variantaProKod(s,V,kod){
+  if(!V.length)return null;
+  const zaklad=V.find(v=>v.jeZaklad)||V[0];
+  const suf=kod.includes("/")?kod.split("/")[1]:null;
+  if(!suf)return zaklad;
+  const podleSuf=SUF[suf]?V.find(v=>v.k&&v.k.nazev===SUF[suf]):null;
+  if(podleSuf)return podleSuf;
+  /* přípona označuje jen barvu — vezmeme stejnou řadu skříní jako základ */
+  const barva=/wh|w$|bila|white/i.test(suf)?"White":/bl|b$|cern|black/i.test(suf)?"Black":null;
+  if(barva&&zaklad.k){
+    const rada=zaklad.k.nazev.replace(/\s+(Black|White)$/,"");
+    const v=V.find(x=>x.k&&x.k.nazev===rada+" "+barva);
+    if(v)return v;
+  }
+  return zaklad;
+}
 function kodVarianty(kody,skrinNazev){
   if(!skrinNazev)return null;
   for(const kod of kody){
@@ -3207,19 +3226,10 @@ function exportSestavy(id){
   const s=D.sestavy.find(x=>x.id===id); if(!s)return;
   const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
   if(!kody.length){alert("Sestava nemá vyplněné kódy variant. Doplň je, jinak nemá import co spárovat.");return}
-  const c=spocti(s), base=s.vyber["Skříň"], H=D.skrine.hodnoty;
+  const c=spocti(s), V=varianty(s);
   const cenaVarianty=kod=>{
-    const suf=kod.includes("/")?kod.split("/")[1]:null;
-    let skr=null;
-    if(suf&&SUF[suf])for(const a of Object.values(D.komponenty))for(const k of a)if(k.nazev===SUF[suf])skr=k;
-    let p=0;
-    if(skr&&base&&skr.id!==base){const x=Number(H[skr.id]),y=Number(H[base]);if(isFinite(x)&&isFinite(y))p=x-y}
-    if(skr&&maDeskuProModul(s)){
-      const e=Number(D.skrine.extra.castka)||0;
-      if(D.skrine.extra.skrine[skr.id])p+=e;
-      if(base&&D.skrine.extra.skrine[base])p-=e;
-    }
-    return Math.round(c.prodej+p);
+    const v=variantaProKod(s,V,kod);
+    return Math.round(v?v.cenaProdej:c.prodej);
   };
   if(s.drzena!=null){
     if(!confirm(`Sestava má drženou cenu ${kc(s.drzena)}, výpočet dává ${kc(c.prodej)}.\n\n`
@@ -3813,22 +3823,14 @@ document.addEventListener("click",e=>{
     const rows=[["code","pairCode","price"]];
     const rowsK=[]; let lvl=0, KATmax=0;
     for(const x of vyb){
-      const c=spocti(x.s), base=x.s.vyber["Skříň"], H=D.skrine.hodnoty;
+      const V=varianty(x.s);
       const novyLvl=LEVELY.find(([lim])=>x.nova<=lim)[1];
       const staryLvl=(x.s.kategorie||[]).find(jeLevel);
       const zmenaLvl=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
       for(const kod of x.kody){
-        const suf=kod.includes("/")?kod.split("/")[1]:null;
-        let skr=null;
-        if(suf&&SUF[suf])for(const a of Object.values(D.komponenty))for(const k of a)if(k.nazev===SUF[suf])skr=k;
-        let p=0;
-        if(skr&&base&&skr.id!==base){const q=Number(H[skr.id]),w=Number(H[base]);if(isFinite(q)&&isFinite(w))p=q-w}
-        if(skr&&maDeskuProModul(x.s)){
-          const e=Number(D.skrine.extra.castka)||0;
-          if(D.skrine.extra.skrine[skr.id])p+=e;
-          if(base&&D.skrine.extra.skrine[base])p-=e;
-        }
-        rows.push([kod,pairProKod(kod,x.s),String(Math.round(c.prodej+p))]);
+        const v=variantaProKod(x.s,V,kod);
+        const cenaK=v?v.cenaProdej:spocti(x.s).prodej;
+        rows.push([kod,pairProKod(kod,x.s),String(Math.round(cenaK))]);
         if(zmenaLvl&&(x.s.kategorie||[]).length){
           const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLvl,y):y);
           rowsK.push([kod,pairProKod(kod,x.s),...kat]);
@@ -4034,23 +4036,20 @@ document.addEventListener("click",e=>{
       const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
       if(!kody.length)continue;
       if(s.drzena!=null){drzene.push((s.nazev||"bez názvu")+" — držím "+kc(s.drzena));continue}
-      const c=spocti(s), base=s.vyber["Skříň"], H=D.skrine.hodnoty;
+      const c=spocti(s), V=varianty(s);
       for(const kod of kody){
-        const suf=kod.includes("/")?kod.split("/")[1]:null;
-        let skr=null;
-        if(suf&&SUF[suf])for(const a of Object.values(D.komponenty))for(const k of a)if(k.nazev===SUF[suf])skr=k;
-        let p=0;
-        if(skr&&base&&skr.id!==base){const x=Number(H[skr.id]),y=Number(H[base]);if(isFinite(x)&&isFinite(y))p=x-y}
+        const vv=variantaProKod(s,V,kod);
+        const cenaK=Math.round(vv?vv.cenaProdej:c.prodej);
         let kat=[], zmenaLevelu=false;
         if(s.kategorie&&s.kategorie.length){
-          const cenaHl=Math.round(c.prodej);
+          const cenaHl=V.length?Math.min(...V.map(x=>x.cenaProdej)):Math.round(c.prodej);
           const novyLvl=LEVELY.find(([lim])=>cenaHl<=lim)[1];
           const staryLvl=s.kategorie.find(jeLevel);
           zmenaLevelu=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
           if(zmenaLevelu)lv++;
           kat=s.kategorie.map(x=>jeLevel(x)?sePodleVzoru(novyLvl,x):x);
         }
-        rows.push([kod,pairProKod(kod,s),String(Math.round(c.prodej+p))]); n++;
+        rows.push([kod,pairProKod(kod,s),String(cenaK)]); n++;
         if(kat.length&&zmenaLevelu){ rowsK.push([kod,pairProKod(kod,s),...kat]);
           if(kat.length>KATmaxZmen)KATmaxZmen=kat.length }
       }
