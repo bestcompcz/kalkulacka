@@ -1134,7 +1134,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=150;
+const VERZE=151;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1505,7 +1505,13 @@ function zmenyCen(){
     const nova=zakl.cenaProdej;
     const kodZakl=kodVarianty(kody,zakl.k?zakl.k.nazev:null)||kody[0];
     const stara=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
-    if(stara===null||nova!==stara)out.push({s,kody,kodZakl,stara,nova,drzena:s.drzena!=null});
+    /* Do seznamu patří i sestava, které cena sedí, ale má na e-shopu špatný level —
+       jinak by se nesoulad zařazení nikdy neukázal. */
+    const lvlStary=(s.kategorie||[]).find(jeLevel);
+    const lvlNovy=LEVELY.find(([lim])=>nova<=lim)[1];
+    const spatnyLevel=!!lvlStary&&!stejnyLevel(lvlStary,lvlNovy);
+    if(stara===null||nova!==stara||spatnyLevel)
+      out.push({s,kody,kodZakl,stara,nova,drzena:s.drzena!=null,jenLevel:stara===nova&&spatnyLevel});
   }
   return out.sort((a,b)=>Math.abs((b.nova-(b.stara??b.nova)))-Math.abs((a.nova-(a.stara??a.nova))));
 }
@@ -1515,7 +1521,7 @@ function zobrazZmenyCen(){
   cenyCache=L;
   $("#mTitle").textContent=`Ceny na e-shop — ${L.length} sestav se liší`;
   $("#mBody").innerHTML=`
-    <p class="hint" style="margin:0 0 8px">Porovnáno se cenou, kterou má produkt na e-shopu.
+    <p class="hint" style="margin:0 0 8px">Porovnáno s cenou a zařazením, které má produkt na e-shopu.
       Zaškrtnuté půjdou do CSV. Odškrtnutá sestava si drží cenu, kterou má, a příště přijde
       odškrtnutá s poznámkou.</p>
     <table><thead><tr><th style="width:34px"></th><th>Sestava</th><th style="width:110px" title="Základní, tedy nejlevnější varianta">Základní varianta</th>
@@ -1532,7 +1538,7 @@ function zobrazZmenyCen(){
       <td style="font-size:11.5px">${esc(x.kodZakl)}</td>
       <td class="r num">${x.stara===null?"—":kc(x.stara)}</td>
       <td class="r num" style="font-weight:600">${kc(x.nova)}</td>
-      <td class="r num" style="color:${r===null?"var(--ink-3)":r>0?"var(--bad)":"var(--ok)"}">${r===null?"neznámá":(r>0?"+":"")+r}</td>
+      <td class="r num" style="color:${r===null?"var(--ink-3)":r>0?"var(--bad)":"var(--ok)"}">${r===null?"neznámá":x.jenLevel?"cena sedí":(r>0?"+":"")+r}</td>
       <td style="font-size:11px">${zmenaLvl?`<span class="band" style="background:#E0B740;color:#3B2C05;font-weight:700">mění se</span>`:"beze změny"}</td></tr>`}).join("")}
     </tbody></table>
     <p class="hint" style="margin:10px 0 0">Sestavy se žlutým pozadím nemají načtenou cenu z e-shopu —
