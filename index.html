@@ -779,6 +779,14 @@ const LEVELY=[[10000,"Herní počítače > Herní počítače LEVEL 1 - DO 10000
  [50000,"Herní počítače > Herní počítače LEVEL 5 - DO 50000 Kč"],
  [1e9,"Herní počítače > Herní počítače LEVEL 6 - HIGH-END PC"]];
 const jeLevel=v=>/Herní počítače (LEVEL|Level)/.test(String(v||""));
+/* Shoptet rozlišuje zařazení do nadřazené kategorie počtem šipek:
+   "A > B" je v nadřazené, "A >> B" není. Při porovnávání levelů na tom nezáleží,
+   ale při nahrazení se musí původní zápis zachovat — jinak by se produkt
+   importem vrátil do nadřazené kategorie. */
+const bezSipek=v=>String(v||"").replace(/\s*>+\s*/g," > ").trim();
+const stejnyLevel=(a,b)=>bezSipek(a)===bezSipek(b);
+const sePodleVzoru=(novy,vzor)=>/>>/.test(String(vzor||""))
+  ? String(novy).replace(/\s*>\s*/g," >> ") : novy;
 function opravLevely(txt){
   const rd=csvRozdel(txt);
   if(!rd.length){toast("Soubor se nepodařilo přečíst");return}
@@ -799,7 +807,7 @@ function opravLevely(txt){
     const stary=x.kats.find(jeLevel);
     const novy=LEVELY.find(([lim])=>x.p<=lim)[1];
     if(stary===novy)continue;
-    zm.push({...x,base:b,stary,novy,nove:x.kats.map(k=>jeLevel(k)?novy:k),KAT});
+    zm.push({...x,base:b,stary,novy,nove:x.kats.map(k=>jeLevel(k)?sePodleVzoru(novy,k):k),KAT});
   }
   if(!zm.length){toast("Všechny levely sedí");return}
   lvlCache={zm,KAT};
@@ -1126,7 +1134,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=149;
+const VERZE=150;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1517,7 +1525,7 @@ function zobrazZmenyCen(){
       const r=x.stara===null?null:x.nova-x.stara;
       const lvlStary=(x.s.kategorie||[]).find(jeLevel);
       const lvlNovy=LEVELY.find(([lim])=>x.nova<=lim)[1];
-      const zmenaLvl=lvlStary&&lvlStary!==lvlNovy;
+      const zmenaLvl=lvlStary&&!stejnyLevel(lvlStary,lvlNovy);
       return `<tr style="background:${x.drzena?"#FDE7E4":r===null?"#FFF8E1":"#FFFFFF"}">
       <td class="r"><input type="checkbox" ${x.drzena?"":"checked"} data-cz="${i}" style="width:auto;cursor:pointer"></td>
       <td><strong>${esc(x.s.nazev)}</strong>${x.drzena?' <span class="band" style="background:#C0392B;color:#fff;font-weight:700">držená cena</span>':""}</td>
@@ -3241,10 +3249,10 @@ function exportSestavy(id){
     const nejlevnejsi=Math.min(...kody.map(cenaVarianty));
     const novyLvl=LEVELY.find(([lim])=>nejlevnejsi<=lim)[1];
     const staryLvl=s.kategorie.find(jeLevel);
-    if(staryLvl&&staryLvl===novyLvl){
+    if(staryLvl&&stejnyLevel(staryLvl,novyLvl)){
       katHlaska="level "+novyLvl.split(">").pop().trim()+" beze změny, kategorie netřeba";
     }else{
-      const seznam=s.kategorie.map(x=>jeLevel(x)?novyLvl:x);
+      const seznam=s.kategorie.map(x=>jeLevel(x)?sePodleVzoru(novyLvl,x):x);
       const cols=seznam.map((_,i)=>i===0?"categoryText":"categoryText"+(i+1));
       const rk=[["code","pairCode",...cols]];
       for(const kod of kody)rk.push([kod,pairProKod(kod,s),...seznam]);
@@ -3802,7 +3810,7 @@ document.addEventListener("click",e=>{
       const c=spocti(x.s), base=x.s.vyber["Skříň"], H=D.skrine.hodnoty;
       const novyLvl=LEVELY.find(([lim])=>x.nova<=lim)[1];
       const staryLvl=(x.s.kategorie||[]).find(jeLevel);
-      const zmenaLvl=!!staryLvl&&staryLvl!==novyLvl;
+      const zmenaLvl=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
       for(const kod of x.kody){
         const suf=kod.includes("/")?kod.split("/")[1]:null;
         let skr=null;
@@ -3816,7 +3824,7 @@ document.addEventListener("click",e=>{
         }
         rows.push([kod,pairProKod(kod,x.s),String(Math.round(c.prodej+p))]);
         if(zmenaLvl&&(x.s.kategorie||[]).length){
-          const kat=x.s.kategorie.map(y=>jeLevel(y)?novyLvl:y);
+          const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLvl,y):y);
           rowsK.push([kod,pairProKod(kod,x.s),...kat]);
           if(kat.length>KATmax)KATmax=kat.length;
         }
@@ -4032,9 +4040,9 @@ document.addEventListener("click",e=>{
           const cenaHl=Math.round(c.prodej);
           const novyLvl=LEVELY.find(([lim])=>cenaHl<=lim)[1];
           const staryLvl=s.kategorie.find(jeLevel);
-          zmenaLevelu=!!staryLvl&&staryLvl!==novyLvl;
+          zmenaLevelu=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
           if(zmenaLevelu)lv++;
-          kat=s.kategorie.map(x=>jeLevel(x)?novyLvl:x);
+          kat=s.kategorie.map(x=>jeLevel(x)?sePodleVzoru(novyLvl,x):x);
         }
         rows.push([kod,pairProKod(kod,s),String(Math.round(c.prodej+p))]); n++;
         if(kat.length&&zmenaLevelu){ rowsK.push([kod,pairProKod(kod,s),...kat]);
