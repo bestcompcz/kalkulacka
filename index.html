@@ -275,6 +275,13 @@ tr.unused td{background:#FEFCFB}
   .btn{padding:5px 9px}
   td:first-child,th:first-child{min-width:160px}
 }
+/* Vyhledávací pole s křížkem na vymazání. Křížek se ukáže, až když je co mazat. */
+.hledat{position:relative;display:inline-flex;align-items:center}
+.hledat input{width:100%;padding-right:26px}
+.hledat .smaz{position:absolute;right:4px;border:none;background:transparent;cursor:pointer;
+  font-size:15px;line-height:1;color:var(--ink-3);padding:2px 4px;border-radius:4px;display:none}
+.hledat .smaz:hover{background:#EDF1F6;color:var(--ink)}
+.hledat.ma .smaz{display:block}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -324,8 +331,8 @@ tr.unused td{background:#FEFCFB}
   <div class="row" style="margin-bottom:4px">
     <h2>Ceník komponent</h2>
     <span class="muted num" id="kompCount"></span>
-    <input type="text" id="kompHledat" placeholder="Hledat komponentu, model, dodavatele…"
-      style="max-width:280px;margin-left:auto">
+    <span class="hledat" data-obal="kompHledat" style="max-width:280px;margin-left:auto"><input type="text" id="kompHledat" placeholder="Hledat komponentu, model, dodavatele…"
+      style="width:100%"><button class="smaz" data-smaz="kompHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
     <label class="row" style="gap:5px;font-size:13px;cursor:pointer">
       <input type="checkbox" id="onlyUnused" style="width:auto"> jen nepoužité</label>
   </div>
@@ -352,7 +359,7 @@ tr.unused td{background:#FEFCFB}
     <button class="btn btn-sm" id="expNavod" title="Jak na export">?</button>
     <button class="btn btn-sm" id="impCeny" title="Načte export produktů ze Shoptetu do kalkulačky">Načíst ↑ z e-shopu do kalkulačky</button>
     <input type="file" id="cenyFile" accept=".csv,text/csv" style="display:none">
-    <input type="text" id="sestHledat" placeholder="Hledat sestavu nebo kód…" style="max-width:240px;margin-left:auto">
+    <span class="hledat" data-obal="sestHledat" style="max-width:240px;margin-left:auto"><input type="text" id="sestHledat" placeholder="Hledat sestavu nebo kód…" style="width:100%"><button class="smaz" data-smaz="sestHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
     <button class="btn btn-sm" id="sestRozbal" title="Rozbalit nebo sbalit všechny">Rozbalit vše</button>
   </div>
   <div class="filtrRada" id="fCpu"></div>
@@ -421,7 +428,7 @@ tr.unused td{background:#FEFCFB}
     <div class="chips" id="nkFilter" style="margin:0"></div>
   </div>
   <div class="row" style="gap:10px;margin-bottom:10px">
-    <input type="text" id="nkHledat" placeholder="Hledat v produktu, komponentě…" style="max-width:260px">
+    <span class="hledat" data-obal="nkHledat" style="max-width:260px"><input type="text" id="nkHledat" placeholder="Hledat v produktu, komponentě…" style="width:100%"><button class="smaz" data-smaz="nkHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
     <select id="nkDodav" style="max-width:170px"></select>
     <label class="row" style="gap:6px;font-size:13px;cursor:pointer;margin-left:auto">
       <input type="checkbox" id="nkOtev" style="width:auto"> jen nedodané</label>
@@ -449,7 +456,7 @@ tr.unused td{background:#FEFCFB}
   <p class="hint">Záznam o průběhu. Do skladu ani do cen nijak nezasahuje.</p>
   <div class="row" id="rkSum" style="gap:24px;margin-bottom:12px"></div>
   <div class="row" style="gap:12px;margin-bottom:8px">
-    <input type="text" id="rkHledat" placeholder="Hledat produkt, dodavatele, poznámku…" style="max-width:320px">
+    <span class="hledat" data-obal="rkHledat" style="max-width:320px"><input type="text" id="rkHledat" placeholder="Hledat produkt, dodavatele, poznámku…" style="width:100%"><button class="smaz" data-smaz="rkHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
     <label class="row" style="gap:6px;font-size:13px;cursor:pointer;margin-left:auto;flex:0 0 auto">
       <input type="checkbox" id="rkOtev" style="width:auto"> jen nevyřízené</label>
   </div>
@@ -476,7 +483,7 @@ tr.unused td{background:#FEFCFB}
   <div class="row" id="skladSum" style="gap:24px;margin-bottom:12px"></div>
   <div class="row" style="gap:12px;margin-bottom:8px">
     <div class="chips" id="skFilter" style="margin:0"></div>
-    <input type="text" id="skHledat" placeholder="Hledat komponentu…" style="max-width:220px;margin-left:auto">
+    <span class="hledat" data-obal="skHledat" style="max-width:220px;margin-left:auto"><input type="text" id="skHledat" placeholder="Hledat komponentu…" style="width:100%"><button class="smaz" data-smaz="skHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
   </div>
   <div class="row" style="gap:18px;margin-bottom:10px;flex-wrap:nowrap">
     <label class="row" style="gap:6px;font-size:13px;cursor:pointer;flex:0 0 auto">
@@ -1134,7 +1141,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=152;
+const VERZE=154;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1947,7 +1954,9 @@ function osvezStavNakupu(t,n){
   const tr=t.closest("tr"); if(!tr)return;
   const S=stavNakupu(n);
   tr.setAttribute("style","background:"+S.bg+";"+S.pruh);
-  const b=tr.querySelector(".band");
+  /* Hledáme štítek stavu podle značky. Prosté ".band" by chytlo ten s počtem
+     kusů skladem, který je v řádku dřív, a přepsalo by ho. */
+  const b=tr.querySelector("[data-stavband]");
   if(b){b.textContent=S.stav; b.setAttribute("style",S.band);
     /* poznámka pod štítkem musí naskočit hned, ne až po překreslení tabulky —
        jinak nevidíš, že řádek čeká na naskladnění */
@@ -1956,7 +1965,9 @@ function osvezStavNakupu(t,n){
       const stara=bunka.querySelector("[data-zask]");
       if(stara)stara.remove();
       const d=Number(n.dodano)||0, z=Number(n.zaskl)||0;
-      const txt=(d>z&&!n.vratka)?["↑ do skladu","var(--signal)"]:(z>0?["✓ ve skladu","var(--ink-3)"]:null);
+      /* Nákup bez komponenty se do skladu nepřidává, jen se sleduje doručení. */
+      const txt=!n.komp?(d>0?["mimo ceník","var(--ink-3)"]:null)
+        :(d>z&&!n.vratka)?["↑ do skladu","var(--signal)"]:(z>0?["✓ ve skladu","var(--ink-3)"]:null);
       if(txt){const e=document.createElement("div");
         e.setAttribute("data-zask","1");
         e.setAttribute("style","font-size:10px;margin-top:2px;color:"+txt[1]);
@@ -2028,7 +2039,10 @@ function renderNakupy(){
       <td class="r"><input type="number" class="px" value="${n.fakt??""}" data-nn="${n.id}" data-nf="fakt"
         placeholder="—" ${n.vyber?"disabled":""} title="${n.faktCislo?esc("faktura "+n.faktCislo):"kolik kusů je vyfakturováno"}"></td>
       <td class="r"><input type="checkbox" ${n.vyber?"checked":""} data-nvyb="${n.id}" style="width:auto;cursor:pointer" title="Vybráno — kandidát na objednávku. Odškrtnutím se z něj stane objednávka."></td>
-      <td class="r"><span class="band" style="${S.band}">${stav}</span>${(Number(n.dodano)||0)>(Number(n.zaskl)||0)&&!n.vratka?'<div data-zask="1" style="font-size:10px;color:var(--signal);margin-top:2px">↑ do skladu</div>':(Number(n.zaskl)||0)>0?'<div data-zask="1" style="font-size:10px;color:var(--ink-3);margin-top:2px">✓ ve skladu</div>':""}</td>
+      <td class="r"><span class="band" data-stavband="1" style="${S.band}">${stav}</span>${
+        !n.komp?((Number(n.dodano)||0)>0?'<div data-zask="1" style="font-size:10px;color:var(--ink-3);margin-top:2px">mimo ceník</div>':"")
+        :(Number(n.dodano)||0)>(Number(n.zaskl)||0)&&!n.vratka?'<div data-zask="1" style="font-size:10px;color:var(--signal);margin-top:2px">↑ do skladu</div>'
+        :(Number(n.zaskl)||0)>0?'<div data-zask="1" style="font-size:10px;color:var(--ink-3);margin-top:2px">✓ ve skladu</div>':""}</td>
       <td class="r"><input type="checkbox" ${n.zaplaceno?"checked":""} data-nz="${n.id}" style="width:auto;cursor:pointer" title="Zaplaceno"></td>
       <td class="r"><input type="date" value="${esc(n.doruceni||"")}" data-nn="${n.id}" data-nf="doruceni"
         style="font-size:11.5px;min-width:0;${zpozdeno(n)?"background:#FDECEA;border-color:#E8A9A2;color:#A03027;font-weight:600":""}"
@@ -3581,7 +3595,14 @@ function renderNast(){
   $("#cVat").value=D.nastaveni.vat; $("#cWork").value=D.nastaveni.prace;
   $("#cWin").value=D.nastaveni.windows; 
 }
-function renderAll(){renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderSklad();renderNast();renderOdpisStav();renderCloud();persist()}
+/* Křížek svítí jen u pole, ve kterém něco je. */
+function osvezKrizky(){
+  for(const w of document.querySelectorAll(".hledat")){
+    const inp=w.querySelector("input");
+    if(inp)w.classList.toggle("ma",!!inp.value);
+  }
+}
+function renderAll(){osvezKrizky();renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderSklad();renderNast();renderOdpisStav();renderCloud();persist()}
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),1900)}
 
@@ -3593,6 +3614,7 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 
 document.addEventListener("input",e=>{
   const t=e.target;
+  if(t.closest&&t.closest(".hledat"))osvezKrizky();
   if(t.dataset.nb){const n=nbNajdi(); if(n){
       n[t.dataset.nb]=["marze","prace","windows"].includes(t.dataset.nb)?(t.value===""?null:Number(t.value)):t.value;
       osvezNabRadek(t,{ks:0,cena:0}); persist();return}}
@@ -4073,6 +4095,10 @@ document.addEventListener("click",e=>{
   if(t.id==="cloudPruhSkryj"){const e=$("#cloudPruh");if(e)e.hidden=true;return}
   if(t.id==="cloudNacti"||t.dataset.cloud==="nacti"){cloudNacti(true);return}
   if(t.id==="cloudUloz"||t.dataset.cloud==="uloz"){cloudUloz();return}
+  if(t.dataset.smaz){
+    const e=$("#"+t.dataset.smaz);
+    if(e){e.value=""; e.dispatchEvent(new Event("input",{bubbles:true})); e.focus()}
+    return}
   if(t.dataset.prevez){prevezZExterniho(t.dataset.prevez);return}
   if(t.id==="cloudVrat"){vratZalohu();return}
   if(t.id==="cenikPublikuj"){publikujCenik().then(()=>{renderCloud();toast("Ceník publikován")});return}
