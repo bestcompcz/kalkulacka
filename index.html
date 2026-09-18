@@ -1200,7 +1200,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=156;
+const VERZE=157;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4444,9 +4444,9 @@ function esZapis(){
   D.essox=esCache.smlouvy.map(({_ulozena,_nova,_novaFaktura,...s})=>s)
     .sort((a,b)=>String(b.datum).localeCompare(String(a.datum)));
   D.essoxCekajici=esCache.cekajici.map(({_cekal,...t})=>t);
-  const n=esCache.nove.length; esCache=null; esVstup={smlouvy:null,banka:null,faktury:null,nazvy:{}};
+  const n=esCache.nove.length, f=esCache.smlouvy.filter(s=>s._novaFaktura).length; esCache=null; esVstup={smlouvy:null,banka:null,faktury:null,nazvy:{}};
   renderEssox(); persist();
-  toast(n?`Zapsáno ${n} plateb`:"Nic nového k zapsání");
+  toast(n||f?`Zapsáno: ${n} plateb, ${f} faktur`:"Nic nového k zapsání");
 }
 
 /* --------- řádky přehledu pro účetní --------- */
@@ -4466,14 +4466,20 @@ function esRadky(obdobi){
 function esStav(s){
   const sum=(s.platby||[]).reduce((a,p)=>a+p.castka,0);
   const ceka=s.fakturaCastka||s.cena, r=Math.round(sum-ceka);
-  if((s.platby||[]).some(p=>p.castka<0)&&Math.abs(sum)<1)return{txt:"stornováno",cls:"ok",rozdil:0,sum};
+  if((s.platby||[]).some(p=>p.castka<0)){
+    if(Math.abs(sum)<1)return{txt:"stornováno",cls:"ok",rozdil:0,sum};
+    if(sum<0)return{txt:"storno, příjem chybí",cls:"warn",rozdil:r,sum};   // platba přišla v měsíci, který není načtený
+  }
   if(!sum)return{txt:"nic nepřišlo",cls:"bad",rozdil:-ceka,sum};
   if(!r)return{txt:"uhrazeno",cls:"ok",rozdil:0,sum};
   return r<0?{txt:`chybí ${kc(-r)}`,cls:"warn",rozdil:r,sum}:{txt:`přeplatek ${kc(r)}`,cls:"warn",rozdil:r,sum};
 }
 function esMesice(){
   const m=new Set();
-  for(const s of D.essox||[])for(const p of s.platby||[])if(p.datum)m.add(String(p.datum).slice(0,7));
+  for(const s of D.essox||[]){
+    if(s.datum)m.add(String(s.datum).slice(0,7));
+    for(const p of s.platby||[])if(p.datum)m.add(String(p.datum).slice(0,7));
+  }
   return [...m].sort().reverse()}
 const ES_MES=["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
 const esMesNazev=k=>{const p=String(k).split("-");return `${ES_MES[+p[1]-1]} ${p[0]}`};
@@ -4509,9 +4515,16 @@ function renderEssox(){
           <td class="num">${s.faktura?esc(s.faktura):`<span style="color:var(--bad)">nenalezena</span>`}</td>
           <td>${ES_TYP[typ]||""}</td>
           <td>${s.jistota==="kontrola"?`<span style="color:var(--signal)">ke kontrole</span>`:s.faktura?"ok":""}</td></tr>`}).join("");
-      $("#esNahledBody").innerHTML=rows||`<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--ink-3)">Žádná nová platba — všechno už je zapsané.</td></tr>`;
+      const fakRows=esCache.smlouvy.filter(s=>s._novaFaktura&&!esCache.nove.some(p=>p.vs===s.vs)).map(s=>
+        `<tr><td class="num">${esCz(s.datum)}</td><td class="num muted">—</td><td>${esc(s.klient)}</td>
+          <td class="num">${esc(s.vs)}</td><td class="num">${esc(s.faktura)}</td>
+          <td>doplnění faktury k uložené smlouvě</td>
+          <td>${s.jistota==="kontrola"?`<span style="color:var(--signal)">ke kontrole</span>`:"ok"}</td></tr>`).join("");
+      $("#esNahledBody").innerHTML=(rows+fakRows)||`<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--ink-3)">Nic nového — všechno už je zapsané.</td></tr>`;
       const nov=esCache.smlouvy.filter(s=>s._nova).length;
+      const fak=esCache.smlouvy.filter(s=>s._novaFaktura).length;
       $("#esNahledStav").innerHTML=`Nových plateb <strong>${esCache.nove.length}</strong> · nových smluv <strong>${nov}</strong>`
+        +(fak?` · doplněných faktur <strong>${fak}</strong>`:"")
         +(esCache.cekajici.length?` · <span style="color:var(--signal)">bez smlouvy ${esCache.cekajici.length}</span>`:"")
         +(esCache.ostatni.length?` · ostatní pohyby ${esCache.ostatni.length}`:"");
     }
@@ -4531,7 +4544,10 @@ function renderEssox(){
 
   const prijato=radky.filter(r=>r.castka>0).reduce((a,r)=>a+r.castka,0);
   const vraceno=radky.filter(r=>r.castka<0).reduce((a,r)=>a+r.castka,0);
-  const sml=(D.essox||[]).filter(s=>!esObdobi||String(s.datum).slice(0,7)===esObdobi);
+  /* do období patří smlouva uzavřená v tom měsíci i starší smlouva, ke které
+     v tom měsíci přišla platba — jinak by řádek v přehledu neměl svůj protějšek */
+  const sml=(D.essox||[]).filter(s=>!esObdobi||String(s.datum).slice(0,7)===esObdobi
+    ||(s.platby||[]).some(p=>String(p.datum).slice(0,7)===esObdobi));
   const potiz=sml.filter(s=>{const v=esStav(s);return v.cls!=="ok"}).length;
   $("#esSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Plateb</div><div class="price" style="font-size:20px">${radky.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">Přijato</div><div class="price">${kc(prijato)}</div></div>
@@ -4567,18 +4583,29 @@ function renderEssox(){
 }
 
 /* --------- načtení souborů --------- */
+/* Víc souborů stejného druhu se sčítá — nahraný výpis za červenec nesmí
+   zahodit srpnový, který je v okně už načtený. */
+function esPridej(druh,nove,klic,nazev){
+  const m=new Map((esVstup[druh]||[]).map(x=>[x[klic],x]));
+  for(const x of nove)m.set(x[klic],x);
+  esVstup[druh]=[...m.values()];
+  esVstup.nazvy[druh]=nazev;
+}
 function esNactiSoubor(f){
   if(!f)return;
   const rd=new FileReader();
   rd.onload=()=>{
     const txt=String(rd.result||"");
     try{
-      if(/^\s*<\?xml|<inv:invoice|<dat:dataPack/.test(txt.slice(0,400))){esVstup.faktury=esParseFakturyXml(txt);esVstup.nazvy.faktury=f.name}
-      else if(/CisloSmlouvy/.test(txt.slice(0,4000))){esVstup.smlouvy=esParseSmlouvy(txt);esVstup.nazvy.smlouvy=f.name}
-      else if(/ID operace/.test(txt.slice(0,4000))){esVstup.banka=esParseBanka(txt);esVstup.nazvy.banka=f.name}
-      else if(/invoiceCode/.test(txt.slice(0,4000))){esVstup.faktury=esParseFakturyCsv(txt);esVstup.nazvy.faktury=f.name}
+      if(/^\s*<\?xml|<inv:invoice|<dat:dataPack/.test(txt.slice(0,400))){esPridej("faktury",esParseFakturyXml(txt),"cislo",f.name)}
+      else if(/CisloSmlouvy/.test(txt.slice(0,4000))){esPridej("smlouvy",esParseSmlouvy(txt),"vs",f.name)}
+      else if(/ID operace/.test(txt.slice(0,4000))){esPridej("banka",esParseBanka(txt),"id",f.name)}
+      else if(/invoiceCode/.test(txt.slice(0,4000))){esPridej("faktury",esParseFakturyCsv(txt),"cislo",f.name)}
       else{toast(`Soubor ${f.name} nepoznávám`);return}
-      if(esVstup.smlouvy&&esVstup.banka)esZpracuj();
+      /* Zpracovat po každém souboru. Dodatečně nahrané starší smlouvy dopárují
+         čekající platby i bez výpisu z účtu a samotné faktury doplní čísla
+         k už uloženým smlouvám. */
+      esZpracuj();
       renderEssox();
       toast(`Načteno: ${f.name}`);
     }catch(e){toast(e.message||"Soubor se nepodařilo přečíst")}
