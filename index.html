@@ -419,7 +419,7 @@ tr.unused td{background:#FEFCFB}
 <section class="panel" id="p-essox" hidden>
   <div class="row" style="margin-bottom:4px"><h2>Essox splátky</h2>
     <select id="esObdobi" style="max-width:150px"></select>
-    <button class="btn btn-sm" id="esCsv">Stáhnout CSV pro účetní</button>
+    <button class="btn btn-sm" id="esXlsx">Stáhnout pro účetní</button>
     <span class="row" id="esSoubory" style="gap:6px;margin-left:auto"></span></div>
   <p class="hint">Přetáhni tři soubory: výpis smluv z portálu Essox, výpis z účtu a export faktur (XML pro Pohodu nebo CSV ze Shoptetu). Platby se spárují podle čísla smlouvy, faktura podle jména a částky. Do dat se zapíše až po potvrzení — bankovní výpis ani faktury se neukládají.</p>
   <div class="row" id="esSum" style="gap:24px;margin-bottom:10px"></div>
@@ -1200,7 +1200,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=157;
+const VERZE=158;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4614,6 +4614,73 @@ function esNactiSoubor(f){
   rd.readAsText(f,"utf-8");
 }
 
+/* --------- zápis XLSX bez knihovny ---------
+   CSV Excel přečte po svém: desetimístný variabilní symbol zobrazí jako
+   4,01E+09 a datum schová za ####. XLSX nese typ buňky i šířku sloupce,
+   takže se otevře rovnou tak, jak má.                                        */
+function esZip(soubory){
+  const enc=new TextEncoder(), tab=(()=>{const t=new Uint32Array(256);
+    for(let i=0;i<256;i++){let c=i;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[i]=c>>>0}return t})();
+  const crc32=b=>{let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=tab[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0};
+  const u16=v=>[v&255,(v>>8)&255], u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255];
+  const casti=[], adresar=[]; let pozice=0;
+  for(const f of soubory){
+    const jmeno=enc.encode(f.name), data=enc.encode(f.xml), crc=crc32(data);
+    const hlav=[...u32(0x04034b50),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),
+      ...u32(crc),...u32(data.length),...u32(data.length),...u16(jmeno.length),...u16(0)];
+    casti.push(new Uint8Array(hlav),jmeno,data);
+    adresar.push({jmeno,crc,delka:data.length,pozice});
+    pozice+=hlav.length+jmeno.length+data.length;
+  }
+  const cd=[];
+  for(const z of adresar)cd.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0),...u16(0),
+    ...u16(0),...u16(0),...u32(z.crc),...u32(z.delka),...u32(z.delka),...u16(z.jmeno.length),
+    ...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(z.pozice)]),z.jmeno);
+  const cdDelka=cd.reduce((a,x)=>a+x.length,0);
+  const konec=new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(adresar.length),
+    ...u16(adresar.length),...u32(cdDelka),...u32(pozice),...u16(0)]);
+  return new Blob([...casti,...cd,konec],
+    {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+const esXmlEsc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const esSloupec=i=>{let s="",n=i+1;while(n){const z=(n-1)%26;s=String.fromCharCode(65+z)+s;n=(n-z-1)/26}return s};
+function esListXml(list){
+  const cols=(list.sirky||[]).map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join("");
+  const radky=[list.hlavicka,...list.radky].map((r,ri)=>{
+    const bunky=r.map((v,ci)=>{const ref=esSloupec(ci)+(ri+1), st=ri?"":' s="1"';
+      return (typeof v==="number"&&isFinite(v))
+        ? `<c r="${ref}"${st}><v>${v}</v></c>`
+        : `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${esXmlEsc(v)}</t></is></c>`}).join("");
+    return `<row r="${ri+1}">${bunky}</row>`}).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${cols?`<cols>${cols}</cols>`:""}<sheetData>${radky}</sheetData></worksheet>`;
+}
+function esXlsx(nazevSouboru,listy){
+  const soubory=[
+    {name:"[Content_Types].xml",xml:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${
+      listy.map((l,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")
+    }<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`},
+    {name:"_rels/.rels",xml:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:"xl/workbook.xml",xml:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${
+      listy.map((l,i)=>`<sheet name="${esXmlEsc(l.nazev)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets></workbook>`},
+    {name:"xl/_rels/workbook.xml.rels",xml:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${
+      listy.map((l,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")
+    }<Relationship Id="rId${listy.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:"xl/styles.xml",xml:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`}
+  ];
+  listy.forEach((l,i)=>soubory.push({name:`xl/worksheets/sheet${i+1}.xml`,xml:esListXml(l)}));
+  const url=URL.createObjectURL(esZip(soubory));
+  const a=document.createElement("a");
+  a.href=url; a.download=nazevSouboru; a.style.display="none";
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},1200);
+}
+
 /* --------- obsluha --------- */
 document.addEventListener("DOMContentLoaded",()=>{
   const d=$("#esDrop"),f=$("#esFile");
@@ -4631,10 +4698,19 @@ document.addEventListener("click",e=>{
   const t=e.target;
   if(t.id==="esZapsat")esZapis();
   if(t.id==="esZrus"){esCache=null;esVstup={smlouvy:null,banka:null,faktury:null,nazvy:{}};renderEssox()}
-  if(t.id==="esCsv"){
-    const rows=[["datum","obdrženo","faktura celkem","číslo faktury","jméno","VS + essox číslo","pzn"]];
-    for(const x of esRadky(esObdobi))rows.push([esCz(x.datum),r(x.castka),r(x.fakturaCastka),x.faktura,x.klient,x.vs,x.pozn]);
-    dl(`essox-platby-${esObdobi||"vse"}.csv`,csv(rows),"text/csv");toast("Staženo")}
+  if(t.id==="esXlsx"){
+    const platby={nazev:"Essox platby",sirky:[10,11,13,13,24,15,34],
+      hlavicka:["datum","obdrženo","faktura celkem","číslo faktury","jméno","VS + essox číslo","pzn"],
+      radky:esRadky(esObdobi).map(x=>[esCz(x.datum),r(x.castka),r(x.fakturaCastka),
+        String(x.faktura||""),x.klient,String(x.vs),x.pozn])};
+    const sml=(D.essox||[]).filter(s=>!esObdobi||String(s.datum).slice(0,7)===esObdobi
+      ||(s.platby||[]).some(p=>String(p.datum).slice(0,7)===esObdobi));
+    const smlouvy={nazev:"Kontrola smluv",sirky:[10,15,24,11,13,11,11,20,13],
+      hlavicka:["uzavřeno","smlouva","klient","cena","přímá platba","úvěr Essox","přijato","stav","faktura"],
+      radky:sml.map(s=>{const v=esStav(s);
+        return [esCz(s.datum),String(s.smlouva),s.klient,r(s.cena),r(s.primaPlatba),r(s.uver),
+          r(v.sum),v.txt,String(s.faktura||"")]})};
+    esXlsx(`essox-platby-${esObdobi||"vse"}.xlsx`,[platby,smlouvy]);toast("Staženo")}
 });
 document.addEventListener("change",e=>{
   const t=e.target;
