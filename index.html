@@ -838,19 +838,23 @@ function chlazeniLepsi(s,p){
   const zakl=zid?najdiKomp(zid):null;
   return urovenChl(cil.nazev)>urovenChl(zakl?zakl.nazev:"");
 }
-const LEVELY=[[10000,"Herní počítače > Herní počítače LEVEL 1 - DO 10000 Kč"],
+/* Názvy přesně podle e-shopu (od 21. 9. 2026 přejmenované z "LEVEL x - DO" na "Level x - do").
+   Porovnání je ale na velikost písmen a mezery necitlivé, takže projdou oba zápisy. */
+const LEVELY=[[10000,"Herní počítače > Herní počítače Level 1 - do 10000 Kč"],
  [20000,"Herní počítače > Herní počítače Level 2 – do 20 000 Kč"],
- [30000,"Herní počítače > Herní počítače LEVEL 3 - DO 30000 Kč"],
- [40000,"Herní počítače > Herní počítače LEVEL 4 - DO 40000 Kč"],
- [50000,"Herní počítače > Herní počítače LEVEL 5 - DO 50000 Kč"],
- [1e9,"Herní počítače > Herní počítače LEVEL 6 - HIGH-END PC"]];
+ [30000,"Herní počítače > Herní počítače Level 3 - do 30000 Kč"],
+ [40000,"Herní počítače > Herní počítače Level 4 - do 40000 Kč"],
+ [50000,"Herní počítače > Herní počítače Level 5 - do 50000 Kč"],
+ [1e9,"Herní počítače > Herní počítače Level 6 - HIGH-END PC"]];
 const jeLevel=v=>/Herní počítače (LEVEL|Level)/.test(String(v||""));
 /* Shoptet rozlišuje zařazení do nadřazené kategorie počtem šipek:
    "A > B" je v nadřazené, "A >> B" není. Při porovnávání levelů na tom nezáleží,
    ale při nahrazení se musí původní zápis zachovat — jinak by se produkt
    importem vrátil do nadřazené kategorie. */
 const bezSipek=v=>String(v||"").replace(/\s*>+\s*/g," > ").trim();
-const stejnyLevel=(a,b)=>bezSipek(a)===bezSipek(b);
+/* Pro porovnání levelů: bez šipek, bez rozdílu velikosti písmen, pomlček a mezer v číslech. */
+const klicLevelu=v=>bezSipek(v).toLowerCase().replace(/[–—]/g,"-").replace(/(\d)\s+(?=\d)/g,"$1").replace(/\s+/g," ");
+const stejnyLevel=(a,b)=>klicLevelu(a)===klicLevelu(b);
 const sePodleVzoru=(novy,vzor)=>/>>/.test(String(vzor||""))
   ? String(novy).replace(/\s*>\s*/g," >> ") : novy;
 function opravLevely(txt){
@@ -1200,7 +1204,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=159;
+const VERZE=160;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
