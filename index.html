@@ -2269,7 +2269,8 @@ function kOdpisu(txt){
     const skrNazev=skrinZRadku(r,kod);
     const barva=barvaZeSkrine(skrNazev);
     const m=rozpadSestavy(s,kod,poc,skrNazev);
-    let pot="";
+    let pot="", info="";
+    const chlPrip=[], chlCpu=[];   // chladiče z příplatku na chlazení a chladiče v ceně výměny CPU
     /* Příplatků může být víc než čtyři — export jich nese tolik, kolik má objednávka. */
     for(let i=1;i<=20;i++){
       const v=r["itemSurcharge"+i+":value"]; if(!v)continue;
@@ -2280,11 +2281,24 @@ function kOdpisu(txt){
          nic nenahrazují. Jinak by třeba WiFi vyřadila z rozpisu Office. */
       const stary=kat==="Ostatní"?null:s.vyber?.[kat];
       if(stary&&m.has(stary))m.set(stary,m.get(stary)-poc);
-      pr(m,podleBarvy(konkretniChladic(p.to,s),barva),poc);
-      if(p.chlNa){const ch=s.vyber?.["Chladič"];if(ch&&m.has(ch))m.set(ch,m.get(ch)-poc);pr(m,podleBarvy(konkretniChladic(p.chlNa,s),barva),poc)}
+      const cilId=podleBarvy(konkretniChladic(p.to,s),barva);
+      pr(m,cilId,poc);
+      if(kat==="Chladič")chlPrip.push(cilId);
+      if(p.chlNa){const ch=s.vyber?.["Chladič"];if(ch&&m.has(ch))m.set(ch,m.get(ch)-poc);
+        const cid=podleBarvy(konkretniChladic(p.chlNa,s),barva); pr(m,cid,poc); chlCpu.push(cid)}
+    }
+    /* Zákazník si vzal chladič navíc k výměně CPU, která chladič už obsahuje.
+       Osadí se jen jeden, ten lepší — zaplacený příplatek je náš zisk. */
+    if(chlPrip.length&&chlCpu.length){
+      const nm=id=>(najdiKomp(id)||{}).nazev||"";
+      const nejPrip=Math.max(...chlPrip.map(id=>urovenChl(nm(id))));
+      const nejCpu=Math.max(...chlCpu.map(id=>urovenChl(nm(id))));
+      const pryc=nejPrip>nejCpu?chlCpu:chlPrip;
+      for(const id of pryc)if(m.has(id))m.set(id,m.get(id)-poc);
+      info=" · osazen jen jeden chladič";
     }
     for(const[i,q]of m) if(q>0){pr(suma,i,q);zaz(i,q,(r.date||"").slice(0,10))}
-    obj.push({C,kod,nazev:s.nazev+pot,dat:(r.date||"").slice(0,10),stav:pot?"s výhradou":"ok"});
+    obj.push({C,kod,nazev:s.nazev+pot+info,dat:(r.date||"").slice(0,10),stav:pot?"s výhradou":"ok"});
   }
   nahradRam(suma,obj,poDat);
   return {obj,suma,chyby:[...new Set(chyby)]};
