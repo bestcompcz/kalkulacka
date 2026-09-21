@@ -1200,7 +1200,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=158;
+const VERZE=159;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1583,7 +1583,14 @@ function zmenyCen(){
   for(const s of D.sestavy){
     const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
     if(!kody.length)continue;
-    const V=varianty(s); if(!V.length)continue;
+    const V=varianty(s);
+    /* Samostatný produkt bez variant skříní (třeba 642) se porovnává podle ceny sestavy. */
+    if(!V.length){
+      const nova=spocti(s).prodej;
+      const stara=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
+      if(stara===null||nova!==stara)out.push({s,kody,kodZakl:kody[0],stara,nova,drzena:s.drzena!=null});
+      continue;
+    }
     /* Základní varianta je ta nejlevnější — podle ní se určuje level i porovnání
        s e-shopem. Nikdy ne první kód v seznamu, ten bývá Fractal. */
     const zakl=V.reduce((a,b)=>b.cenaProdej<a.cenaProdej?b:a);
@@ -2151,11 +2158,23 @@ function najdiSestavu(kod){
     if(k.trim()===kod)return s;
   return null;
 }
+/* Staré názvy příplatků z doby před 1. 9. 2026. Na e-shopu je nesou produkty,
+   kterým kalkulačka příplatky nikdy nepřepsala — třeba 642. */
+const STARE_PRIPLATKY={
+  "na 32 gb ddr4 (z 16gb)":"na 32GB DDR4 (z 16GB)",
+  "instalace + licence office pro plus 2024":"Office 2024",
+  "přidat wifi 6 + bluetooth interní":"WIFI 6 + Bluetooth",
+  "přidat wifi 6 + bluetooth":"WIFI 6 + Bluetooth",
+  "přidat wifi 5":"WIFI 5",
+  "výměna za 1 tb ssd":"z 500 GB M2 na 1 TB M2",
+  "výměna za 2 tb ssd":"z 1 TB M2 na 2 TB M2",
+  "b550m tuf gaming atx":"za B550 TUF GAMING ATX",
+};
 function najdiPriplatek(txt){
   const n=x=>String(x||"").replace(/[\s.]+/g," ").trim().toLowerCase();
+  const hledej=t=>{for(const p of D.priplatky) if(n(p.eshop)===t||n(p.nazev)===t)return p; return null};
   const t=n(txt);
-  for(const p of D.priplatky) if(n(p.eshop)===t||n(p.nazev)===t)return p;
-  return null;
+  return hledej(t)||(STARE_PRIPLATKY[t]?hledej(n(STARE_PRIPLATKY[t])):null);
 }
 /* Skříň se určuje z názvu varianty ("PC skříň: X3 Black Montech"), protože kódy
    X3/X4 mohou být na e-shopu prohozené. Kód je jen záloha, když název chybí. */
@@ -2220,6 +2239,10 @@ function rozpadSestavy(s,kod,poc,skrinNazev){
 function kOdpisu(txt){
   const radky=csvRozdel(txt); const obj=[]; const suma=new Map(); const chyby=[];
   const pr=(m,i,q)=>{if(!i)return;const k=najdiKomp(i);if(k&&k.neomezene)return;m.set(i,(m.get(i)||0)+q)};
+  /* U každého odepisovaného kusu si pamatujeme datum objednávky — náhrada pamětí
+     se pak rozhoduje podle toho, co bylo skladem v den objednávky, ne dnes. */
+  const poDat=new Map();
+  const zaz=(i,q,dat)=>{if(!i)return;if(!poDat.has(i))poDat.set(i,[]);poDat.get(i).push({dat,q})};
   for(const r of radky){
     const kod=String(r.orderItemCode??r.itemCode??"").trim();
     const typ=r.orderItemType!==undefined?String(r.orderItemType)
@@ -2237,7 +2260,7 @@ function kOdpisu(txt){
       const nazevProdeje=r.orderItemName||r.itemName||"";
       if(!z)z=komponentaZNazvuProdeje(nazevProdeje);
       if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),stav:"neomezené"})}
-      else if(z){pr(suma,z.id,poc);obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),
+      else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),
         stav:kod?"zboží":"podle názvu"})}
       else {obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),stav:"NEZNÁMÝ KÓD"});
         chyby.push(kod||nazevProdeje)}
@@ -2247,20 +2270,23 @@ function kOdpisu(txt){
     const barva=barvaZeSkrine(skrNazev);
     const m=rozpadSestavy(s,kod,poc,skrNazev);
     let pot="";
-    for(let i=1;i<=4;i++){
+    /* Příplatků může být víc než čtyři — export jich nese tolik, kolik má objednávka. */
+    for(let i=1;i<=20;i++){
       const v=r["itemSurcharge"+i+":value"]; if(!v)continue;
       const p=najdiPriplatek(v);
       if(!p){pot+=" ⚠ "+v;chyby.push(v);continue}
       const kat=(()=>{for(const[c,a]of Object.entries(D.komponenty))for(const k of a)if(k.id===p.to)return c;})();
-      const stary=s.vyber?.[kat];
+      /* Slot Ostatní je přídavný — WiFi, Office nebo ventilátor se přidávají,
+         nic nenahrazují. Jinak by třeba WiFi vyřadila z rozpisu Office. */
+      const stary=kat==="Ostatní"?null:s.vyber?.[kat];
       if(stary&&m.has(stary))m.set(stary,m.get(stary)-poc);
       pr(m,podleBarvy(konkretniChladic(p.to,s),barva),poc);
       if(p.chlNa){const ch=s.vyber?.["Chladič"];if(ch&&m.has(ch))m.set(ch,m.get(ch)-poc);pr(m,podleBarvy(konkretniChladic(p.chlNa,s),barva),poc)}
     }
-    for(const[i,q]of m) if(q>0)pr(suma,i,q);
+    for(const[i,q]of m) if(q>0){pr(suma,i,q);zaz(i,q,(r.date||"").slice(0,10))}
     obj.push({C,kod,nazev:s.nazev+pot,dat:(r.date||"").slice(0,10),stav:pot?"s výhradou":"ok"});
   }
-  nahradRam(suma,obj);
+  nahradRam(suma,obj,poDat);
   return {obj,suma,chyby:[...new Set(chyby)]};
 }
 function nactiSoubor(f){
@@ -2383,7 +2409,7 @@ function provedZaskladneni(){
       const kam=x.ext?"ksExt":"ks";
       x.k[kam]=(Number(x.k[kam])||0)+x.pridat;
     }
-    for(const r of x.rad) r.zaskl=Number(r.dodano)||0;
+    for(const r of x.rad){ r.zaskl=Number(r.dodano)||0; if(!x.ext)r.naskladneno=dnes(); }
     n++;
   }
   $("#modal").hidden=true; renderAll(); toast(n+" komponent naskladněno");
@@ -3035,7 +3061,7 @@ function provedVse(){
       const kam=x.ext?"ksExt":"ks";        // externí dodávka nesmí skončit v hlavním skladu
       x.k[kam]=(Number(x.k[kam])||0)+x.pridat;
     }
-    for(const r of x.rad)r.zaskl=Number(r.dodano)||0;
+    for(const r of x.rad){ r.zaskl=Number(r.dodano)||0; if(!x.ext)r.naskladneno=dnes(); }
   }
   for(const z of A.ceny){z.k.sklad=z.prum; z.k.modely=z.modely}
   A.sest.forEach((g,i)=>{
@@ -3461,13 +3487,30 @@ function polovicniModul(k){
   }
   return null;
 }
-function nahradRam(suma,obj){
+/* Kolik kusů komponenty bylo naskladněno až po daném dni — ty v den objednávky
+   ještě nebyly k dispozici. Nákupy bez data naskladnění bereme jako dávno skladem. */
+function naskladnenoPo(id,dat){
+  let n=0;
+  for(const x of D.nakupy)
+    if(x.komp===id&&x.naskladneno&&dat&&x.naskladneno>dat)n+=Number(x.zaskl)||0;
+  return n;
+}
+function nahradRam(suma,obj,poDat){
   for(const[id,q]of [...suma.entries()]){
     const k=najdiKomp(id); if(!k)continue;
     const pol=polovicniModul(k); if(!pol)continue;
-    const skladem=Math.max(0,Number(k.ks)||0);
-    const chybi=q-skladem;
+    const ks=Math.max(0,Number(k.ks)||0);
+    /* Objednávky projdeme od nejstarší. Každá smí sáhnout jen na kusy, které byly
+       skladem v její den — pozdější dodávky se jí nepočítají. */
+    const obj2=((poDat&&poDat.get(id))||[{dat:"",q}]).slice().sort((a,b)=>a.dat<b.dat?-1:1);
+    let spotreba=0, chybi=0;
+    for(const o of obj2){
+      const k_dispozici=Math.max(0,ks-naskladnenoPo(id,o.dat)-spotreba);
+      const vezmu=Math.min(o.q,k_dispozici);
+      spotreba+=vezmu; chybi+=o.q-vezmu;
+    }
     if(chybi<=0)continue;
+    const skladem=q-chybi;
     if(skladem>0)suma.set(id,skladem); else suma.delete(id);
     suma.set(pol.id,(suma.get(pol.id)||0)+2*chybi);
     obj.push({C:"",kod:"",nazev:chybi+"× "+k.nazev+" → "+(2*chybi)+"× "+pol.nazev,dat:"",stav:"náhrada"});
