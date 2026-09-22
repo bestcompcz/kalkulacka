@@ -902,7 +902,9 @@ function nactiCenyZEshopu(txt){
   for(const r of rd){
     const kod=String(r.code??r.itemCode??"").trim();
     const c=String(r.price??r.itemUnitPriceWithVat??"").replace(/\s/g,"").replace(",",".");
-    if(kod&&c&&isFinite(Number(c)))mapa[kod]=Number(c);
+    /* Export teď u produktu bez ceny posílá prázdno a nula znamená skutečnou nulu —
+       ani jedno nesmí přepsat uloženou cenu sestavy. */
+    if(kod&&c&&isFinite(Number(c))&&Number(c)>0)mapa[kod]=Number(c);
     const pc=String(r.pairCode??"").trim();
     if(kod&&pc)pary[kod]=pc;
     if(kod&&KATS.length){const l=KATS.map(k=>String(r[k]||"").trim()).filter(Boolean);
@@ -1204,7 +1206,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=161;
+const VERZE=162;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2144,6 +2146,19 @@ const SUF={X3:"Montech X3 Black",X3BL:"Montech X3 Black",BL:"Montech X3 Black",
  XR:"Montech XR Black",XR2:"Montech XR White",
  NOR:"Fractal North Black",FRA:"Fractal North Black",NOR2:"Fractal North White",FRA2:"Fractal North White",
  GAM:"Gamemax"};
+/* Od 15. 9. 2026 Shoptet v importu rozlišuje: nula = cena nula (produkt se zobrazí zdarma),
+   prázdná buňka = smazat cenu. Do souboru s cenami proto nikdy nesmí jít nula ani prázdno —
+   takový řádek vyřadíme a ohlásíme. Hlavička je první řádek, cena poslední sloupec. */
+function bezNulovychCen(rows){
+  if(!rows||rows.length<2)return rows;
+  const ic=rows[0].indexOf("price"); if(ic<0)return rows;
+  const venku=[];
+  const ok=[rows[0],...rows.slice(1).filter(r=>{const c=Number(String(r[ic]).replace(",","."));
+    if(!(c>0)){venku.push(r[0]);return false} return true})];
+  if(venku.length)setTimeout(()=>alert("Vyřazeno "+venku.length+" řádků s nulovou nebo prázdnou cenou — Shoptet by je teď"
+    +" zapsal jako zboží zdarma:\n\n"+venku.join(", ")+"\n\nZkontroluj složení a ceny těchto sestav."),50);
+  return ok;
+}
 function csvRozdel(txt){
   /* Uvozovky se řeší dřív než konce řádků — pole s víceřádkovou poznámkou zákazníka
      jinak rozseklo záznam a všechna pole objednávky se načetla prázdná. */
@@ -3109,7 +3124,7 @@ function vsePotvrd(csvTaky){
     });
     if(n){
       const kody=A.sest.filter((g,i)=>!r.drzet.has(i)).map(g=>(g.s.kod||"").split(",")[0].split("/")[0]).join("-");
-      dl(`shoptet-ceny-${dnes()}-${A.sest.length-r.drzet.size}sestav-${n}variant-${bezDiakritiky(kody)}.csv`,csv(rows),"text/csv");
+      dl(`shoptet-ceny-${dnes()}-${A.sest.length-r.drzet.size}sestav-${n}variant-${bezDiakritiky(kody)}.csv`,csv(bezNulovychCen(rows)),"text/csv");
       hlaska+=`, CSV s ${n} variantami`}
     else hlaska+=", do CSV nešlo nic";
   }
@@ -3366,7 +3381,7 @@ function exportSestavy(id){
   /* 1 · ceny */
   const rc=[["code","pairCode","price"]];
   for(const kod of kody)rc.push([kod,pairProKod(kod,s),String(cenaVarianty(kod))]);
-  dl(`shoptet-${zaklad}-ceny-${dnes()}.csv`,csv(rc),"text/csv");
+  dl(`shoptet-${zaklad}-ceny-${dnes()}.csv`,csv(bezNulovychCen(rc)),"text/csv");
   /* 2 · příplatky */
   const pary=[...new Set(priplatkySestavy(s).filter(p=>!s.vyp[p.id]).map(paramPriplatku))].sort();
   let poc=0;
@@ -3991,7 +4006,7 @@ document.addEventListener("click",e=>{
       x.s.drzena=null;
     }
     const kody=vyb.map(x=>x.kodZakl.split("/")[0]).join("-").slice(0,40);
-    dl(`shoptet-ceny-${dnes()}-${vyb.length}sestav-${rows.length-1}variant-${kody}.csv`,csv(rows),"text/csv");
+    dl(`shoptet-ceny-${dnes()}-${vyb.length}sestav-${rows.length-1}variant-${kody}.csv`,csv(bezNulovychCen(rows)),"text/csv");
     if(rowsK.length){
       const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
       dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
@@ -4204,7 +4219,7 @@ document.addEventListener("click",e=>{
           if(kat.length>KATmaxZmen)KATmaxZmen=kat.length }
       }
     }
-    dl(`shoptet-ceny-vse-${dnes()}-${n}variant.csv`,csv(rows),"text/csv");
+    dl(`shoptet-ceny-vse-${dnes()}-${n}variant.csv`,csv(bezNulovychCen(rows)),"text/csv");
     if(rowsK.length){
       const cols=[]; for(let k=1;k<=KATmaxZmen;k++)cols.push(k===1?"categoryText":"categoryText"+k);
       dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
