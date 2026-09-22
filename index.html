@@ -1204,7 +1204,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=160;
+const VERZE=161;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2145,16 +2145,24 @@ const SUF={X3:"Montech X3 Black",X3BL:"Montech X3 Black",BL:"Montech X3 Black",
  NOR:"Fractal North Black",FRA:"Fractal North Black",NOR2:"Fractal North White",FRA2:"Fractal North White",
  GAM:"Gamemax"};
 function csvRozdel(txt){
-  const lines=txt.replace(/^\uFEFF/,"").split(/\r?\n/).filter(x=>x.trim());
-  if(!lines.length)return[];
-  const sep=(lines[0].match(/;/g)||[]).length>(lines[0].match(/,/g)||[]).length?";":",";
-  const par=l=>{const o=[];let c="",q=false;
-    for(let i=0;i<l.length;i++){const ch=l[i];
-      if(ch==='"'){ if(q&&l[i+1]==='"'){c+='"';i++} else q=!q }
-      else if(ch===sep&&!q){o.push(c);c=""} else c+=ch}
-    o.push(c);return o.map(x=>x.trim())};
-  const hd=par(lines[0]);
-  return lines.slice(1).map(l=>{const v=par(l),o={};hd.forEach((k,i)=>o[k]=v[i]??"");return o});
+  /* Uvozovky se řeší dřív než konce řádků — pole s víceřádkovou poznámkou zákazníka
+     jinak rozseklo záznam a všechna pole objednávky se načetla prázdná. */
+  txt=String(txt||"").replace(/^\uFEFF/,"");
+  const konec=txt.search(/\r?\n/);
+  const hd0=konec<0?txt:txt.slice(0,konec);
+  const sep=(hd0.match(/;/g)||[]).length>(hd0.match(/,/g)||[]).length?";":",";
+  const rows=[];let row=[],c="",q=false;
+  for(let i=0;i<txt.length;i++){const ch=txt[i];
+    if(q){ if(ch==='"'){ if(txt[i+1]==='"'){c+='"';i++} else q=false } else c+=ch; continue }
+    if(ch==='"')q=true;
+    else if(ch===sep){row.push(c.trim());c=""}
+    else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&txt[i+1]==="\n")i++;
+      row.push(c.trim());c=""; if(row.some(x=>x))rows.push(row); row=[] }
+    else c+=ch}
+  row.push(c.trim()); if(row.some(x=>x))rows.push(row);
+  if(!rows.length)return[];
+  const hd=rows[0];
+  return rows.slice(1).map(v=>{const o={};hd.forEach((k,i)=>o[k]=v[i]??"");return o});
 }
 function najdiSestavu(kod){
   if(!String(kod||"").trim())return null;   // bez kódu nesmí nic sedět, sestavy bez kódů mají prázdný záznam
