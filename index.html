@@ -1207,7 +1207,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=165;
+const VERZE=166;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2360,7 +2360,14 @@ function zobrazOdpis(){
   if(!txt){toast("Vlož nejdřív CSV export");return}
   let R; try{R=kOdpisu(txt)}catch(e){toast("CSV se nepodařilo přečíst");return}
   odpisCache=R;
-  $("#pdBody").innerHTML=R.obj.map(o=>`<tr style="background:${o.stav==="ok"?"#F1FAF4":o.stav==="zboží"?"#F7FAFF":o.stav==="již odepsáno"?"#F3F4F6":o.stav==="před revizí"?"#F3F4F6":o.stav==="služba, neodečítá se"?"#FFF8E1":"#FDECEA"}">
+  $("#pdBody").innerHTML=R.obj.map(o=>`<tr style="background:${
+    /* Červená patří jen skutečné chybě. Zelená se odečte, modrá je zboží,
+       šedá se přeskočí, žlutá chce jen odkliknout. */
+    o.stav==="ok"?"#F1FAF4"
+    :(o.stav==="zboží"||o.stav==="podle názvu")?"#F7FAFF"
+    :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené")?"#F3F4F6"
+    :o.stav==="služba, neodečítá se"?"#FFF8E1"
+    :"#FDECEA"}">
     <td class="num">${esc(o.C)}</td><td class="num">${esc(o.kod)}</td>
     <td style="font-size:12px">${esc(o.nazev.slice(0,54))}</td>
     <td class="num" style="font-size:11.5px">${esc(o.dat)}</td>
