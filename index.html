@@ -694,8 +694,30 @@ let canStore=true;
 try{localStorage.setItem(KEY+"-t","1");localStorage.removeItem(KEY+"-t")}catch(e){canStore=false}
 /* Zápis do prohlížeče bez příznaku neuložených změn — používá se po úspěšném
    uložení do cloudu, aby si prohlížeč pamatoval i razítko o uložení. */
-function ulozLokalne(){ if(!canStore)return; try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){} }
-function persist(){ ulozLokalne(); cloudZmena=true; renderCloud(); naplanujAutoUlozeni(); }
+/* Každé okno má vlastní kopii dat v paměti a ukládá celý stav. Kdyby byla
+   kalkulačka otevřená dvakrát, pozdější zápis by tiše přepsal ten dřívější,
+   proto si okna dávají vědět a to zastaralé se uzamkne. */
+const OKNO=Math.random().toString(36).slice(2,9);
+let cizeOkno=false;
+function ulozLokalne(){ if(!canStore)return;
+  try{localStorage.setItem(KEY,JSON.stringify(D));
+      localStorage.setItem(KEY+"-okno",OKNO+"|"+Date.now())}catch(e){} }
+function persist(){
+  if(cizeOkno){varujDvojiOkno();return}
+  ulozLokalne(); cloudZmena=true; renderCloud(); naplanujAutoUlozeni(); }
+function varujDvojiOkno(){
+  const el=$("#cloudPruh");
+  if(el){$("#cloudPruhText").textContent=
+    "Kalkulačka je otevřená ve dvou oknech a v tom druhém se právě pracuje. "
+    +"Tohle okno má zastaralá data a neukládá — obnov ho (F5), nebo ho zavři.";
+    el.hidden=false}
+}
+/* Zápis z jiného okna nad stejnými daty — tohle okno zamkneme. */
+window.addEventListener("storage",e=>{
+  if(e.key!==KEY+"-okno"||!e.newValue)return;
+  if(String(e.newValue).split("|")[0]===OKNO)return;
+  cizeOkno=true; clearTimeout(autoCas); varujDvojiOkno();
+});
 function restore(){ if(!canStore)return null;
   try{const s=localStorage.getItem(KEY);return s?oprav(JSON.parse(s)):null}catch(e){return null} }
 const COLL=new Intl.Collator("cs",{numeric:true,sensitivity:"base"});
@@ -712,6 +734,7 @@ const MAPA_DEF={"CPU":"Výměna procesoru","RAM":"Rozšířit pamět RAM","SSD":
  "Základní deska":"Výměna základní desky","Zdroj":"Výměna zdroje","Chladič":"Lepší chlazení CPU"};
 function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.bezDph))d.bezDph=["atc","atcomp","asbis","100mega"];   // uvádějí ceny bez DPH
+  if(!d.parovani||typeof d.parovani!=="object")d.parovani={};  // naučené dvojice popis → komponenta
   for(const arr of Object.values(d.komponenty||{}))for(const k of arr)
     if(k.ksExt===undefined)k.ksExt=null;       // kusy uložené v externím skladu
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
@@ -1211,7 +1234,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=168;
+const VERZE=171;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2668,7 +2691,11 @@ function dodavatelZOdkazu(url){
 }
 /* najde komponentu, jejíž název celý sedí do popisu z e-shopu */
 function komponentaZPopisu(txt){
-  const t=norm3(txt).split(" ");
+  /* Nejdřív to, co jsme se jednou naučili ručně — přesný popis od dodavatele. */
+  const klic=norm3(txt);
+  const naucene=(D.parovani||{})[klic];
+  if(naucene){const k=najdiKomp(naucene); if(k)return k}
+  const t=klic.split(" ");
   let nej=null,nejS=0;
   for(const[c,arr]of Object.entries(D.komponenty))for(const k of arr){
     if(k.genericky)continue;
@@ -2894,19 +2921,25 @@ function zobrazKosikNahled(pol){
       <span style="font-size:12.5px;font-weight:600">Dodavatel pro všechny řádky:</span>
       <input type="text" id="kosikDodavatel" value="${esc(pol[0]&&pol[0].dodavatel||"")}"
         placeholder="např. alza" style="max-width:170px;${stylDodavatele(pol[0]&&pol[0].dodavatel)}">
+      <span style="font-size:12.5px;font-weight:600;margin-left:14px">Doručení:</span>
+      <input type="date" id="kosikDoruceni" style="max-width:150px;font-size:12.5px"
+        title="Vyplní se u všech založených nákupů">
     </div>
-    <div class="tbl"><table><thead><tr><th>Popis z e-shopu</th><th style="width:96px">Datum</th><th style="width:150px">Komponenta</th>
+    <div class="tbl"><table><thead><tr><th>Popis z e-shopu</th><th style="width:96px">Datum</th><th style="width:190px">Komponenta</th>
       <th class="r" style="width:52px">Ks</th>
-      <th class="r" style="width:104px">Cena/ks s DPH</th><th class="r" style="width:96px">Celkem s DPH</th></tr></thead><tbody>
+      <th class="r" style="width:104px">Cena/ks s DPH</th><th class="r" style="width:96px">Celkem s DPH</th>
+      <th style="width:30px"></th></tr></thead><tbody>
     ${pol.map((x,i)=>`<tr style="background:${x.komp?"#DDF3E6":"#FDF4D4"};box-shadow:inset 4px 0 0 ${x.komp?"#1B8A57":"#E0B740"}">
       <td style="font-size:11.5px">${esc(x.popis)}${x.odkaz?` <a href="${esc(x.odkaz)}" target="_blank" rel="noopener">↗</a>`:""}</td>
       <td><input type="date" value="${esc(x.datum||new Date().toISOString().slice(0,10))}" data-ki="${i}" data-kf="datum" style="font-size:11.5px;min-width:0"></td>
-      <td>${x.komp?`<strong style="font-size:11.5px">${esc(x.kompNazev)}</strong>`
-        :`<span class="band" style="background:#FBF0C9;color:#7A6410;font-weight:600">mimo ceník</span>`}</td>
+      <td><input type="text" list="kompList" value="${esc(x.komp?x.kompNazev:"")}"
+        data-ki="${i}" data-kf="kompText" placeholder="dohledat v ceníku…"
+        style="width:100%;font-size:11.5px;${x.komp?"font-weight:700":"background:#FFF8E1;border-color:#E0B740"}"></td>
       <td class="r"><input type="number" class="px" value="${x.ks}" data-ki="${i}" data-kf="ks"></td>
       <td class="r"><input type="number" class="px" value="${(kosikBezDph?naDph(x.cena):x.cena)??""}" data-ki="${i}" data-kf="cena" placeholder="—">
         ${kosikBezDph&&x.cena!=null?`<div style="font-size:10px;color:var(--ink-3);margin-top:2px">z ${kc(x.cena)} bez DPH</div>`:""}</td>
-      <td class="r num">${kc((x.ks||0)*((kosikBezDph?naDph(x.cena):x.cena)||0))}</td></tr>`).join("")}
+      <td class="r num">${kc((x.ks||0)*((kosikBezDph?naDph(x.cena):x.cena)||0))}</td>
+      <td class="r"><button class="icon-x" data-ksmaz="${i}" title="Vyhodit řádek">✕</button></td></tr>`).join("")}
     </tbody></table></div>
     ${(()=>{const M=pol.meta; if(!M||(!M.zaklad&&!M.celkem))return "";
       const polozky=pol.reduce((a,x)=>a+(x.ks||0)*(x.cena||0),0);
@@ -2931,7 +2964,8 @@ function zobrazKosikNahled(pol){
       Až objednáš, odškrtneš je v tabulce a překlopí se na objednáno.</p>
     <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="btn btn-sm" id="kosikZrus">Zrušit</button>
-      <button class="btn btn-sm btn-primary" id="kosikOk">Vložit ${pol.length} nákupů</button></div>`;
+      <button class="btn btn-sm" id="kosikOk">Vložit ${pol.length} nákupů</button>
+      <button class="btn btn-sm btn-primary" id="kosikObj">Vložit ${pol.length} a rovnou objednat</button></div>`;
   $("#modal").hidden=false;
 }
 
@@ -3859,6 +3893,23 @@ document.addEventListener("input",e=>{
         if(c.length>=7&&x.nakup){const r=(x.cena||0)-(Number(x.nakup.cena)||0);
           c[6].textContent=(r>0?"+":"")+Math.round(r*100)/100}}
       return}}
+  if(t.dataset.ki!==undefined&&t.dataset.kf==="kompText"&&kosikCache){
+    /* Ruční dohledání komponenty u řádku, který se nenapároval sám. */
+    const x=kosikCache[Number(t.dataset.ki)];
+    if(x){
+      const v=t.value.trim(); let nalezena=null;
+      for(const arr of Object.values(D.komponenty))for(const k of arr) if(k.nazev===v&&!nalezena)nalezena=k;
+      x.komp=nalezena?nalezena.id:null; x.kompNazev=nalezena?nalezena.nazev:"";
+      /* Zapamatujeme si to — příště se stejný produkt napáruje sám. */
+      const klic=norm3(x.popis||"");
+      if(klic){ if(nalezena)D.parovani[klic]=nalezena.id; else delete D.parovani[klic]; persist(); }
+      t.style.fontWeight=nalezena?"700":"";
+      t.style.background=nalezena?"":"#FFF8E1";
+      t.style.borderColor=nalezena?"":"#E0B740";
+      const tr=t.closest("tr");
+      if(tr){tr.style.background=nalezena?"#DDF3E6":"#FDF4D4";
+        tr.style.boxShadow="inset 4px 0 0 "+(nalezena?"#1B8A57":"#E0B740")}
+      return}}
   if(t.dataset.ki!==undefined&&t.dataset.kf&&kosikCache){
     const x=kosikCache[Number(t.dataset.ki)];
     if(x){x[t.dataset.kf]=["ks","cena"].includes(t.dataset.kf)?(t.value===""?null:Number(t.value)):t.value;
@@ -4333,6 +4384,15 @@ document.addEventListener("click",e=>{
     renderNakupy(); persist(); toast(n+" položek vyfakturováno");return}
   if(t.id==="nkHromadne"){zobrazKosik();return}
   if(t.id==="kosikZrus"){kosikCache=null;$("#modal").hidden=true;return}
+  /* Křížek vyhodí řádek z dávky — třeba zboží, které do skladu nepatří. */
+  if(t.dataset.ksmaz!==undefined&&kosikCache){
+    const i=Number(t.dataset.ksmaz);
+    const meta=kosikCache.meta;
+    kosikCache.splice(i,1);
+    if(meta)kosikCache.meta=meta;
+    if(!kosikCache.length){kosikCache=null;$("#modal").hidden=true;toast("Nezůstal žádný řádek");return}
+    zobrazKosikNahled(kosikCache);
+    return}
   if(t.id==="kosikDodavatel"){
     if(kosikCache){for(const x of kosikCache)x.dodavatel=t.value;
       t.setAttribute("style","max-width:170px;"+stylDodavatele(t.value))}
@@ -4346,14 +4406,18 @@ document.addEventListener("click",e=>{
     const pol=rozeberKosik($("#kosikText").value);
     if(!pol.length){toast("Z textu se nepodařilo nic vyčíst");return}
     zobrazKosikNahled(pol);return}
-  if(t.id==="kosikOk"){
+  if(t.id==="kosikOk"||t.id==="kosikObj"){
     if(!kosikCache)return;
+    /* Kandidát (vybráno) se teprve chystá objednat, objednané už je na cestě. */
+    const objednano=t.id==="kosikObj";
     const dnesni=new Date().toISOString().slice(0,10);
+    const dor=($("#kosikDoruceni")&&$("#kosikDoruceni").value)||null;
     for(const x of kosikCache)D.nakupy.push({id:uid(),datum:x.datum||dnesni,komp:x.komp,popis:x.popis,
       dodavatel:x.dodavatel,ks:x.ks,cena:kosikBezDph?naDph(x.cena):x.cena,dodano:null,zaskl:0,zaplaceno:false,vratka:null,
-      vyber:true,doruceni:null,odkaz:x.odkaz});
+      vyber:!objednano,doruceni:dor,odkaz:x.odkaz});
     const n=kosikCache.length; kosikCache=null; $("#modal").hidden=true;
-    nkKat=""; nkDod=""; renderNakupy(); persist(); toast(n+" nákupů vloženo jako vybrané");return}
+    nkKat=""; nkDod=""; renderNakupy(); persist();
+    toast(n+" nákupů vloženo jako "+(objednano?"objednané":"vybrané")+(dor?", doručení "+czDatum(dor):""));return}
   if(t.id==="nkVse"){zobrazVse()}
   if(t.id==="vseZrus"){vseCache=null;$("#modal").hidden=true}
   if(t.id==="vseOk"){vsePotvrd(false)}
