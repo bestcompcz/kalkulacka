@@ -735,6 +735,7 @@ const MAPA_DEF={"CPU":"Výměna procesoru","RAM":"Rozšířit pamět RAM","SSD":
 function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.bezDph))d.bezDph=["atc","atcomp","asbis","100mega"];   // uvádějí ceny bez DPH
   if(!d.parovani||typeof d.parovani!=="object")d.parovani={};  // naučené dvojice popis → komponenta
+  if(!Array.isArray(d.cenaZaKus))d.cenaZaKus=["mironet"];      // uvádějí cenu za kus, ne za položku
   for(const arr of Object.values(d.komponenty||{}))for(const k of arr)
     if(k.ksExt===undefined)k.ksExt=null;       // kusy uložené v externím skladu
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
@@ -1234,7 +1235,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=174;
+const VERZE=175;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2692,9 +2693,18 @@ function dodavatelZOdkazu(url){
   return h.replace(/\.(cz|com|sk|eu)$/,"");
 }
 /* najde komponentu, jejíž název celý sedí do popisu z e-shopu */
+/* Dodavatelé píší procesory jinak než náš ceník: "AMD Ryzen 7 5700" proti "R7 5700".
+   Před porovnáním proto zápis sjednotíme. */
+function sjednotNazev(t){
+  return String(t||"")
+    .replace(/\bamd\s+ryzen\s*(\d)\b/gi,"r$1")
+    .replace(/\bryzen\s*(\d)\b/gi,"r$1")
+    .replace(/\bintel\s+core\s+i(\d)\b/gi,"core i$1")
+    .replace(/\bgeforce\s+/gi,"").replace(/\bradeon\s+/gi,"");
+}
 function komponentaZPopisu(txt){
   /* Nejdřív to, co jsme se jednou naučili ručně — přesný popis od dodavatele. */
-  const klic=norm3(txt);
+  const klic=norm3(sjednotNazev(txt));
   const naucene=(D.parovani||{})[klic];
   if(naucene){const k=najdiKomp(naucene); if(k)return k}
   const t=klic.split(" ");
@@ -2849,7 +2859,9 @@ function rozeberRadky(radky){
   const uloz=()=>{ if(cur&&cur.popis){
       let cena=cur.jednotkova;
       if(cena==null){const c=cur.ceny.filter(v=>v!==0);
-        cena=c.length?(cur.ks>1?Math.round((Math.max(...c.map(Math.abs))/cur.ks)*100)/100*Math.sign(c[0]):c[0]):null}
+        /* Většina e-shopů uvádí u položky celkovou částku, Mironet cenu za kus. */
+        const zaKus=(D.cenaZaKus||[]).includes(String(cur.dodavatel||dodavatelZOdkazu(cur.odkaz)||"").toLowerCase());
+        cena=c.length?(cur.ks>1&&!zaKus?Math.round((Math.max(...c.map(Math.abs))/cur.ks)*100)/100*Math.sign(c[0]):c[0]):null}
       if(cur.poplatek){ if(cena)meta.poplatky+=Math.round(cena*cur.ks*100)/100 }
       else if(cena!=null)out.push({popis:cur.popis,odkaz:cur.odkaz,ks:cur.ks,cena,datum:null,
         doruceni:cur.doruceni||null});
@@ -2879,7 +2891,12 @@ function rozeberRadky(radky){
     const popis=(md?md[1]:l).replace(/^[-–•*]\s*/,"").trim();
     if(!popis)continue;
     uloz();
-    cur={popis,odkaz:md?md[2]:"",ks:1,ceny:[],jednotkova:null,doruceni:null,
+    /* Mironet lepí počet kusů rovnou za odkaz: "…)30 ks". Vytáhneme ho z konce řádku. */
+    let zbytek=md?l.slice(md[0].length):"";
+    let ksRadek=null, cenaRadek=null;
+    const mks=zbytek.match(/(\d+)\s*(?:ks|x)\b/i); if(mks)ksRadek=Number(mks[1]);
+    const mce=zbytek.match(/(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]/i); if(mce)cenaRadek=cis(mce[1]);
+    cur={popis,odkaz:md?md[2]:"",ks:ksRadek||1,ceny:cenaRadek!=null?[cenaRadek]:[],jednotkova:null,doruceni:null,
       poplatek:NENIZBOZI.test(popis)||/^služba\b|^sluzba\b/i.test(popis)};
   }
   uloz();
@@ -2896,7 +2913,11 @@ function odhadniDodavatele(pol){
 function rozeberKosik(txt){
   const radky=String(txt||"").split(/\r?\n/).map(x=>x.replace(/[ \u00a0]+$/,""));
   const tab=rozeberTabulku(radky);
-  const zdroj=tab.length?tab:(radky.some(l=>/^\s*\d+\s*ks\b/i.test(l))?rozeberRadky(radky):rozeberVolnyText(txt));
+  /* Řádkový rozpis poznáme i tehdy, když je počet kusů přilepený za odkazem,
+     jako to dělá Mironet ("…)30 ks"). */
+  const jeRadkovy=radky.some(l=>/^\s*\d+\s*ks\b/i.test(l))
+    ||radky.some(l=>/\]\(https?:\/\/[^\s)]+\)\s*\d+\s*(?:ks|x)\b/i.test(l));
+  const zdroj=tab.length?tab:(jeRadkovy?rozeberRadky(radky):rozeberVolnyText(txt));
   const r=zdroj.map(x=>{
     const k=komponentaZPopisu(x.popis);
     return Object.assign({},x,{komp:k?k.id:null,kompNazev:k?k.nazev:null,
@@ -2905,7 +2926,7 @@ function rozeberKosik(txt){
   r.meta=zdroj.meta;
   return r;
 }
-let kosikCache=null, kosikBezDph=false, kosikRucne=false, kosikDoruceni=null, kosikZaplaceno=false;
+let kosikCache=null, kosikBezDph=false, kosikRucne=false, kosikDoruceni=null, kosikZaplaceno=false, kosikZaKus=false, kosikText="";
 function zobrazKosik(){
   $("#mTitle").textContent="Vložit nákupy hromadně";
   $("#mBody").innerHTML=`
@@ -2920,6 +2941,8 @@ function zobrazKosik(){
 const naDph=x=>x==null?null:Math.round(x*1.21*100)/100;
 function zobrazKosikNahled(pol){
   kosikCache=pol;
+  {const dod=(pol[0]&&pol[0].dodavatel||"").toLowerCase();
+   kosikZaKus=dod?(D.cenaZaKus||[]).includes(dod):false;}
   /* Když všechny položky hlásí stejné doručení, rovnou ho nabídneme. */
   if(kosikDoruceni==null){
     const dny=[...new Set(pol.map(x=>x.doruceni).filter(Boolean))];
@@ -2945,6 +2968,9 @@ function zobrazKosikNahled(pol){
         style="max-width:150px;font-size:12.5px" title="Vyplní se u všech založených nákupů">
       <label class="row" style="gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;margin-left:14px">
         <input type="checkbox" id="kosikZapl" ${kosikZaplaceno?"checked":""} style="width:auto"> zaplaceno</label>
+      <label class="row" style="gap:6px;font-size:12.5px;cursor:pointer;margin-left:14px"
+        title="Mironet uvádí cenu za kus, většina e-shopů celkovou částku za položku">
+        <input type="checkbox" id="kosikZaKus" ${kosikZaKus?"checked":""} style="width:auto"> ceny jsou za kus</label>
     </div>
     <div class="tbl"><table><thead><tr><th>Popis z e-shopu</th><th style="width:96px">Datum</th><th style="width:190px">Komponenta</th>
       <th class="r" style="width:52px">Ks</th>
@@ -4416,6 +4442,12 @@ document.addEventListener("click",e=>{
     return}
   if(t.id==="kosikDoruceni"){kosikDoruceni=t.value||null;return}
   if(t.id==="kosikZapl"){kosikZaplaceno=t.checked;return}
+  if(t.id==="kosikZaKus"){
+    kosikZaKus=t.checked;
+    const dod=(kosikCache&&kosikCache[0]&&kosikCache[0].dodavatel||"").toLowerCase();
+    if(dod){ D.cenaZaKus=(D.cenaZaKus||[]).filter(x=>x!==dod); if(kosikZaKus)D.cenaZaKus.push(dod); persist(); }
+    if(kosikText)zobrazKosikNahled(rozeberKosik(kosikText));   // ceny se přepočítají
+    return}
   if(t.id==="kosikDodavatel"){
     if(kosikCache){for(const x of kosikCache)x.dodavatel=t.value;
       t.setAttribute("style","max-width:170px;"+stylDodavatele(t.value))}
@@ -4426,7 +4458,8 @@ document.addEventListener("click",e=>{
     if(kosikCache)zobrazKosikNahled(kosikCache); return}
   if(t.id==="kosikRozeber"){
     kosikRucne=false;
-    const pol=rozeberKosik($("#kosikText").value);
+    kosikText=$("#kosikText").value;          // schováme si text, ať jde přepočítat
+    const pol=rozeberKosik(kosikText);
     if(!pol.length){toast("Z textu se nepodařilo nic vyčíst");return}
     zobrazKosikNahled(pol);return}
   if(t.id==="kosikOk"||t.id==="kosikObj"){
