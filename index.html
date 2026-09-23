@@ -727,6 +727,7 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
     if(r.reseni===undefined)r.reseni=""; if(r.hotovo===undefined)r.hotovo=false;
     if(r.uzavreno===undefined)r.uzavreno=null; if(r.pozn===undefined)r.pozn=""; }
   if(d.odpisyDo===undefined)d.odpisyDo=null;      // datum poslední odepsané objednávky
+  if(d.odpisyOd===undefined)d.odpisyOd="2026-09-01";  // revize skladu — starší objednávky se neodepisují
   if(!Array.isArray(d.odpisyLog))d.odpisyLog=[];  // historie běhů
   return d;}
 function initNaklady(d){
@@ -1206,7 +1207,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=163;
+const VERZE=165;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2266,7 +2267,7 @@ function rozpadSestavy(s,kod,poc,skrinNazev){
   return out;
 }
 function kOdpisu(txt){
-  const radky=csvRozdel(txt); const obj=[]; const suma=new Map(); const chyby=[];
+  const radky=csvRozdel(txt); const obj=[]; const suma=new Map(); const chyby=[]; const sluzby=[];
   const pr=(m,i,q)=>{if(!i)return;const k=najdiKomp(i);if(k&&k.neomezene)return;m.set(i,(m.get(i)||0)+q)};
   /* U každého odepisovaného kusu si pamatujeme datum objednávky — náhrada pamětí
      se pak rozhoduje podle toho, co bylo skladem v den objednávky, ne dnes. */
@@ -2279,6 +2280,11 @@ function kOdpisu(txt){
     if(typ!=="product")continue;
     const C=r.code||"", poc=Number(String(r.orderItemAmount??r.itemAmount??1).replace(",","."))||1;
     if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:"",dat:(r.date||"").slice(0,10),stav:"již odepsáno"});continue}
+    /* Objednávka starší než revize skladu je v jeho stavu už zahrnutá. Feed ji posílá
+       podle času poslední změny, takže sem doputuje i dva roky stará reklamace. */
+    const den=(r.date||"").slice(0,10);
+    if(D.odpisyOd&&den&&den<D.odpisyOd){
+      obj.push({C,kod,nazev:r.orderItemName||"",dat:den,stav:"před revizí"});continue}
     const s=najdiSestavu(kod);
     if(!s){
       /* Bez podmínky na neprázdný kód by se prázdno rovnalo prázdnu
@@ -2291,8 +2297,13 @@ function kOdpisu(txt){
       if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),stav:"neomezené"})}
       else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),
         stav:kod?"zboží":"podle názvu"})}
+      /* Položka bez kódu bývá jednorázová služba nebo doúčtování — ze skladu se
+         nic odečítat nemá. Jen se vypíše a Lukáš ji odklikne. Nenapárovaný KÓD
+         je jiná věc: tam se nejspíš nepodařilo poznat komponentu. */
+      else if(!kod){obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),stav:"služba, neodečítá se"});
+        sluzby.push(C+" · "+nazevProdeje)}
       else {obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),stav:"NEZNÁMÝ KÓD"});
-        chyby.push(kod||nazevProdeje)}
+        chyby.push(kod)}
       continue;
     }
     const skrNazev=skrinZRadku(r,kod);
@@ -2330,7 +2341,7 @@ function kOdpisu(txt){
     obj.push({C,kod,nazev:s.nazev+pot+info,dat:(r.date||"").slice(0,10),stav:pot?"s výhradou":"ok"});
   }
   nahradRam(suma,obj,poDat);
-  return {obj,suma,chyby:[...new Set(chyby)]};
+  return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)]};
 }
 function nactiSoubor(f){
   if(!f)return;
@@ -2349,17 +2360,21 @@ function zobrazOdpis(){
   if(!txt){toast("Vlož nejdřív CSV export");return}
   let R; try{R=kOdpisu(txt)}catch(e){toast("CSV se nepodařilo přečíst");return}
   odpisCache=R;
-  $("#pdBody").innerHTML=R.obj.map(o=>`<tr style="background:${o.stav==="ok"?"#F1FAF4":o.stav==="zboží"?"#F7FAFF":o.stav==="již odepsáno"?"#F3F4F6":"#FDECEA"}">
+  $("#pdBody").innerHTML=R.obj.map(o=>`<tr style="background:${o.stav==="ok"?"#F1FAF4":o.stav==="zboží"?"#F7FAFF":o.stav==="již odepsáno"?"#F3F4F6":o.stav==="před revizí"?"#F3F4F6":o.stav==="služba, neodečítá se"?"#FFF8E1":"#FDECEA"}">
     <td class="num">${esc(o.C)}</td><td class="num">${esc(o.kod)}</td>
     <td style="font-size:12px">${esc(o.nazev.slice(0,54))}</td>
     <td class="num" style="font-size:11.5px">${esc(o.dat)}</td>
     <td><span class="band">${o.stav}</span></td></tr>`).join("")
     ||'<tr><td colspan="5" style="padding:22px;text-align:center;color:var(--ink-3)">Nic k odepsání.</td></tr>';
-  const nove=R.obj.filter(o=>o.stav!=="již odepsáno"&&o.stav!=="NEZNÁMÝ KÓD").length;
+  const nove=R.obj.filter(o=>o.stav!=="již odepsáno"&&o.stav!=="NEZNÁMÝ KÓD"
+    &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se").length;
   $("#pdSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Položek v souboru</div><div class="price" style="font-size:20px">${R.obj.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">K odepsání</div><div class="price" style="font-size:20px;color:var(--ok)">${nove}</div></div>
     <div><div class="muted" style="font-size:11.5px">Problémů</div><div class="price" style="font-size:20px;color:${R.chyby.length?"var(--bad)":"var(--ink-3)"}">${R.chyby.length}</div></div>`;
   if(R.chyby.length){toast("Nejdřív vyřeš "+R.chyby.length+" nenapárovaných položek");return}
+  if((R.sluzby||[]).length&&!confirm("V objednávkách je "+R.sluzby.length+" položka bez kódu, "
+      +"typicky služba nebo doúčtování:\n\n"+R.sluzby.join("\n")
+      +"\n\nZe skladu se nic neodečte. Pokračovat?"))return;
   if(!R.suma.size){toast("Nic nového k odepsání");return}
   const L=[...R.suma].map(([id,q])=>{const k=najdiKomp(id);return{k,q}}).filter(x=>x.k)
     .sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
@@ -2384,6 +2399,8 @@ function renderOdpisStav(){
   const n=D.odpisy.length, log=D.odpisyLog||[];
   const posl=log.length?log[log.length-1]:null;
   el.innerHTML=`<div class="row" style="gap:22px;align-items:center;flex-wrap:wrap">
+    <div><div class="muted" style="font-size:11.5px">Revize skladu — starší objednávky se neodepisují</div>
+      <input type="date" id="pdOd" value="${esc(D.odpisyOd||"")}" style="font-size:13px;font-weight:600;width:150px"></div>
     <div><div class="muted" style="font-size:11.5px">Odpisy vyřešené do</div>
       <div class="row" style="gap:6px;align-items:center">
         <input type="date" id="pdDo" value="${esc(D.odpisyDo||"")}" style="font-size:13px;font-weight:600;width:150px">
@@ -3928,6 +3945,7 @@ document.addEventListener("change",e=>{
   if(t.dataset.ske!==undefined){D.skrine.extra.skrine[t.dataset.ske]=t.checked;renderSest();persist()}
   if(t.id==="skModul"){D.skrine.extra.modul=t.value||null;renderSest();persist()}
   if(t.id==="pdDo"){D.odpisyDo=t.value||null;persist();return}
+  if(t.id==="pdOd"){D.odpisyOd=t.value||null;persist();return}
   if(t.tagName==="SELECT"&&t.dataset.id&&["chladic","tower","nahrada"].includes(t.dataset.f)){
     const k=najdiKomp(t.dataset.id);
     if(k){k[t.dataset.f]=t.value||null;renderSest();renderSur();persist();return}}
