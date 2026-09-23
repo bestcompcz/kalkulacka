@@ -1206,7 +1206,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=162;
+const VERZE=163;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2195,7 +2195,9 @@ const STARE_PRIPLATKY={
   "přidat wifi 5":"WIFI 5",
   "výměna za 1 tb ssd":"z 500 GB M2 na 1 TB M2",
   "výměna za 2 tb ssd":"z 1 TB M2 na 2 TB M2",
-  "b550m tuf gaming atx":"za B550 TUF GAMING ATX",
+  /* Mapuje se na vnitřní název příplatku, ne na e-shopový — ten se mění podle toho,
+     jaké desky se zrovna prodávají (ATX / mATX). */
+  "b550m tuf gaming atx":"z A520 na B550 TUF ATX",
 };
 function najdiPriplatek(txt){
   const n=x=>String(x||"").replace(/[\s.]+/g," ").trim().toLowerCase();
