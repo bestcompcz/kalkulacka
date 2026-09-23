@@ -399,6 +399,10 @@ tr.unused td{background:#FEFCFB}
   <div id="pdStav" class="card" style="padding:10px 12px;margin-bottom:10px;background:#F1FAF4;border-color:#BFE6CE"></div>
   <p class="hint">Vlož obsah CSV exportu objednávek ze Shoptetu (obě šablony, s <code>itemCode</code> i <code>orderItemCode</code>). Sestavy se rozpadnou na komponenty podle konfigurace, příplatků a zvolené barvy skříně. Odečte se až po tvém potvrzení.</p>
   <div class="row" id="pdSum" style="gap:24px;margin-bottom:10px"></div>
+  <div class="row" style="gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+    <button class="btn btn-sm btn-primary" id="pdCloud">↓ Načíst prodeje z cloudu</button>
+    <span class="muted" style="font-size:12px" id="pdCloudStav">Objednávky, které robot stáhl ze Shoptetu</span>
+  </div>
   <div id="pdDrop" style="border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;
        background:#FBFDFF;cursor:pointer;transition:border-color .15s,background .15s">
     <div style="font-size:26px;line-height:1">📄</div>
@@ -1207,7 +1211,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=166;
+const VERZE=167;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2355,6 +2359,44 @@ function nactiSoubor(f){
   };
   rd.readAsText(f,"utf-8");
 }
+/* Dávky, které noční robot stáhl ze Shoptetu do repozitáře s daty. */
+let prodejeZCloudu=null;
+async function nactiProdejeZCloudu(){
+  if(!cloudOk()){toast("Nejdřív nastav synchronizaci s cloudem");return}
+  const c=D.cloud||{};
+  const url=`https://api.github.com/repos/${c.repo}/contents/prodeje/aktualni.csv`;
+  const st=$("#pdCloudStav"); if(st)st.textContent="stahuji…";
+  try{
+    const r=await ghFetch(url);
+    if(r.status===404){if(st)st.textContent="V cloudu zatím žádné objednávky nejsou";return}
+    if(!r.ok){if(st)st.textContent="Nepodařilo se stáhnout ("+r.status+")";return}
+    const j=await r.json();
+    const txt=zBase64(j.content);
+    const radku=txt.trim().split(/\r?\n/).length-1;
+    prodejeZCloudu={sha:j.sha,hlavicka:txt.split(/\r?\n/)[0]};
+    $("#pdCsv").value=txt;
+    const so=$("#pdSoubor"); if(so)so.textContent="z cloudu · "+radku+" řádků";
+    if(st)st.textContent="Staženo "+radku+" řádků";
+    zobrazOdpis();
+  }catch(e){ if(st)st.textContent="Chyba: "+e.message }
+}
+/* Po úspěšném odpisu dávku v repozitáři vyprázdníme, ať se nehromadí.
+   Když mezitím přibyla novější dávka, necháme ji být. */
+async function uklidProdejeVCloudu(){
+  if(!prodejeZCloudu||!cloudOk())return;
+  const c=D.cloud||{};
+  const url=`https://api.github.com/repos/${c.repo}/contents/prodeje/aktualni.csv`;
+  try{
+    const r=await ghFetch(url); if(!r.ok)return;
+    const j=await r.json();
+    if(j.sha!==prodejeZCloudu.sha){toast("V cloudu je novější dávka, nechávám ji");return}
+    await ghFetch(url,{method:"PUT",body:JSON.stringify({
+      message:"zpracováno v kalkulačce "+new Date().toISOString().slice(0,16).replace("T"," "),
+      content:doBase64(prodejeZCloudu.hlavicka+"\n"), sha:j.sha})});
+    prodejeZCloudu=null;
+    const st=$("#pdCloudStav"); if(st)st.textContent="Dávka zpracovaná a v cloudu uklizená";
+  }catch(e){}
+}
 function zobrazOdpis(){
   const txt=$("#pdCsv").value.trim();
   if(!txt){toast("Vlož nejdřív CSV export");return}
@@ -2422,7 +2464,7 @@ function provedOdpis(){
   const R=odpisCache; if(!R)return;
   for(const[id,q]of R.suma){const k=najdiKomp(id); if(k)k.ks=(Number(k.ks)||0)-q}
   let maxDat=D.odpisyDo||"", n=0;
-  for(const o of R.obj) if(o.stav==="ok"||o.stav==="zboží"||o.stav==="s výhradou"){
+  for(const o of R.obj) if(o.stav==="ok"||o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="s výhradou"){
     D.odpisy.push(o.C+"|"+o.kod); n++;
     if(o.dat&&o.dat>maxDat)maxDat=o.dat;
   }
@@ -2430,6 +2472,7 @@ function provedOdpis(){
   D.odpisyLog.push({kdy:new Date().toISOString().slice(0,10),polozek:n,do:maxDat||null});
   $("#modal").hidden=true; $("#pdCsv").value=""; odpisCache=null;
   renderAll(); toast("Sklad odepsán, vyřešeno do "+czDatum(maxDat));
+  uklidProdejeVCloudu();
 }
 /* Dodávka označená jako externí jde do skladu mimo Plzeň. Vedeme ji zvlášť,
    protože z ní nejde stavět — nejdřív se musí přivézt. */
@@ -3953,6 +3996,7 @@ document.addEventListener("change",e=>{
   if(t.id==="skModul"){D.skrine.extra.modul=t.value||null;renderSest();persist()}
   if(t.id==="pdDo"){D.odpisyDo=t.value||null;persist();return}
   if(t.id==="pdOd"){D.odpisyOd=t.value||null;persist();return}
+  if(t.id==="pdCloud"){nactiProdejeZCloudu();return}
   if(t.tagName==="SELECT"&&t.dataset.id&&["chladic","tower","nahrada"].includes(t.dataset.f)){
     const k=najdiKomp(t.dataset.id);
     if(k){k[t.dataset.f]=t.value||null;renderSest();renderSur();persist();return}}
