@@ -1211,7 +1211,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=167;
+const VERZE=168;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3996,7 +3996,6 @@ document.addEventListener("change",e=>{
   if(t.id==="skModul"){D.skrine.extra.modul=t.value||null;renderSest();persist()}
   if(t.id==="pdDo"){D.odpisyDo=t.value||null;persist();return}
   if(t.id==="pdOd"){D.odpisyOd=t.value||null;persist();return}
-  if(t.id==="pdCloud"){nactiProdejeZCloudu();return}
   if(t.tagName==="SELECT"&&t.dataset.id&&["chladic","tower","nahrada"].includes(t.dataset.f)){
     const k=najdiKomp(t.dataset.id);
     if(k){k[t.dataset.f]=t.value||null;renderSest();renderSur();persist();return}}
@@ -4248,6 +4247,7 @@ document.addEventListener("click",e=>{
   if(t.id==="modelyOk"){const k=najdiKomp(modelyId);
     if(k){k.modely=$("#modelyText").value.replace(/\n{3,}/g,"\n\n").trim()}
     $("#modal").hidden=true;modelyId=null;renderKomp();renderSklad();persist();toast("Uloženo")}
+  if(t.id==="pdCloud"){nactiProdejeZCloudu();return}
   if(t.id==="pdNacti"){zobrazOdpis()}
   if(e.target.closest("#pdDrop")&&e.target.id!=="pdFile"){$("#pdFile").click()}
   if(t.id==="odpZrus"){$("#modal").hidden=true}
