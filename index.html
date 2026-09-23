@@ -1234,7 +1234,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=172;
+const VERZE=174;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2153,15 +2153,17 @@ function renderNakupy(){
         <option value="ceka" ${n.vratka==="ceka"?"selected":""}>↩ vrátit peníze</option>
         <option value="vraceno" ${n.vratka==="vraceno"?"selected":""}>✓ vráceno</option></select></td>
       <td class="r"><button class="icon-x" data-delnk="${n.id}">×</button></td></tr>`}).join("");
-  let nezapl=0,vratky=0,hodV=0,vybr=0,hodVyb=0;
+  let nezapl=0,vratky=0,hodV=0,vybr=0,hodVyb=0,mesic=0;
+  const mesicOd=new Date().toISOString().slice(0,7);   // běžný měsíc, YYYY-MM
   for(const n of D.nakupy){const ks=Number(n.ks)||0,d=Number(n.dodano)||0,c=Number(n.cena)||0;
     if(n.vyber){vybr++;hodVyb+=ks*c;continue}          // vybrané ještě nejsou objednávka
     if(n.vratka==="ceka"){vratky++;hodV+=(ks-d)*c;continue}
     if(n.vratka==="vraceno")continue;
     celk+=d*c; if(d<ks){ceka++;hodC+=(ks-d)*c}
+    if(String(n.datum||"").slice(0,7)===mesicOd)mesic+=ks*c;   // podle data objednání
     if(!n.zaplaceno)nezapl+=ks*c;}
   $("#nkBody").innerHTML=rows||`<tr><td colspan="16" style="padding:26px;text-align:center;color:var(--ink-3)">${D.nakupy.length?"Nic neodpovídá filtru.":"Zatím žádný nákup."}</td></tr>`;
-  $("#nkSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Nakoupeno celkem</div><div class="price">${kc(celk)}</div></div>
+  $("#nkSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Nakoupeno tento měsíc</div><div class="price">${kc(mesic)}</div></div>
     <div><div class="muted" style="font-size:11.5px">Vybráno k objednání</div><div class="price" style="font-size:20px;color:${vybr?"var(--signal)":"var(--ink-3)"}">${vybr?kc(hodVyb):"—"}</div></div>
     <div><div class="muted" style="font-size:11.5px">Čeká na dodání</div><div class="price" style="font-size:20px;color:${ceka?"var(--bad)":"var(--ok)"}">${ceka}</div></div>
     <div><div class="muted" style="font-size:11.5px">Hodnota nedodaného</div><div class="price" style="font-size:20px">${kc(hodC)}</div></div>
@@ -2833,6 +2835,13 @@ const KOSIK_STAV=/^(\+\s*)?(služba|sluzba|rezervováno|rezervovano|skladem|dár
 /* Řádky o platbě a doručení na konci košíku. */
 const KOSIK_KONEC=/^(přidat zboží|pridat zbozi|bankovním|bankovnim|doručení|doruceni|platba|způsob|zpusob|hotově|hotove|kartou|dobírkou|dobirkou|osobní|osobni)/i;
 const KOSIK_SOUHRN=/^(cena bez dph|celková cena|celkova cena|celkem|mezisou|k úhradě|k uhrade)/i;
+/* Z "25.9." udělá datum. Rok se doplní tak, aby vyšel nejbližší budoucí termín. */
+function doDataDne(d,m,r){
+  const dnes=new Date(); let rok=r?Number(r):dnes.getFullYear();
+  const dat=()=>new Date(Date.UTC(rok,Number(m)-1,Number(d)));
+  if(!r&&dat()<new Date(Date.UTC(dnes.getFullYear(),dnes.getMonth(),dnes.getDate()-14)))rok++;
+  return dat().toISOString().slice(0,10);
+}
 function rozeberRadky(radky){
   const cis=x=>Number(String(x).replace(/[\s\u00a0]/g,"").replace(",","."))||0;
   const meta={zaklad:null,dph:null,celkem:null,poplatky:0,poplatkyPopis:[]};
@@ -2842,7 +2851,8 @@ function rozeberRadky(radky){
       if(cena==null){const c=cur.ceny.filter(v=>v!==0);
         cena=c.length?(cur.ks>1?Math.round((Math.max(...c.map(Math.abs))/cur.ks)*100)/100*Math.sign(c[0]):c[0]):null}
       if(cur.poplatek){ if(cena)meta.poplatky+=Math.round(cena*cur.ks*100)/100 }
-      else if(cena!=null)out.push({popis:cur.popis,odkaz:cur.odkaz,ks:cur.ks,cena,datum:null});
+      else if(cena!=null)out.push({popis:cur.popis,odkaz:cur.odkaz,ks:cur.ks,cena,datum:null,
+        doruceni:cur.doruceni||null});
     } cur=null };
   for(let raw of radky){
     let l=String(raw).replace(/~~/g,"").trim();
@@ -2859,13 +2869,17 @@ function rozeberRadky(radky){
     const mc=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]/i);
     if(mc){ if(cur)cur.ceny.push(cis(mc[1])); continue }
     if(KOSIK_STAV.test(l))continue;
+    /* Smarty uvádí u každé položky "Doručení 25.9. (pátek)". Je to údaj k položce,
+       ne konec košíku — datum si zapamatujeme a řádek přeskočíme. */
+    const mdor=l.match(/^doru[čc]en[ií]\s+(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{4})?/i);
+    if(mdor){ if(cur)cur.doruceni=doDataDne(mdor[1],mdor[2],mdor[3]); continue }
     if(KOSIK_KONEC.test(l)){uloz();continue}
     /* zbývá text — název položky, nebo poplatek typu doprava či sleva */
     const md=l.match(/^\[(.+?)\]\((https?:\/\/[^\s)]+)\)/);
     const popis=(md?md[1]:l).replace(/^[-–•*]\s*/,"").trim();
     if(!popis)continue;
     uloz();
-    cur={popis,odkaz:md?md[2]:"",ks:1,ceny:[],jednotkova:null,
+    cur={popis,odkaz:md?md[2]:"",ks:1,ceny:[],jednotkova:null,doruceni:null,
       poplatek:NENIZBOZI.test(popis)||/^služba\b|^sluzba\b/i.test(popis)};
   }
   uloz();
@@ -2891,7 +2905,7 @@ function rozeberKosik(txt){
   r.meta=zdroj.meta;
   return r;
 }
-let kosikCache=null, kosikBezDph=false, kosikRucne=false, kosikDoruceni=null;
+let kosikCache=null, kosikBezDph=false, kosikRucne=false, kosikDoruceni=null, kosikZaplaceno=false;
 function zobrazKosik(){
   $("#mTitle").textContent="Vložit nákupy hromadně";
   $("#mBody").innerHTML=`
@@ -2906,6 +2920,11 @@ function zobrazKosik(){
 const naDph=x=>x==null?null:Math.round(x*1.21*100)/100;
 function zobrazKosikNahled(pol){
   kosikCache=pol;
+  /* Když všechny položky hlásí stejné doručení, rovnou ho nabídneme. */
+  if(kosikDoruceni==null){
+    const dny=[...new Set(pol.map(x=>x.doruceni).filter(Boolean))];
+    if(dny.length===1)kosikDoruceni=dny[0];
+  }
   /* ATC a distributoři uvádějí ceny bez DPH, kalkulačka je vede s DPH */
   if(pol.length&&!kosikRucne){
     /* Výchozí je s DPH. Zapne se jen tehdy, když to jde spolehlivě poznat —
@@ -2924,6 +2943,8 @@ function zobrazKosikNahled(pol){
       <span style="font-size:12.5px;font-weight:600;margin-left:14px">Doručení:</span>
       <input type="date" id="kosikDoruceni" value="${esc(kosikDoruceni||"")}"
         style="max-width:150px;font-size:12.5px" title="Vyplní se u všech založených nákupů">
+      <label class="row" style="gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;margin-left:14px">
+        <input type="checkbox" id="kosikZapl" ${kosikZaplaceno?"checked":""} style="width:auto"> zaplaceno</label>
     </div>
     <div class="tbl"><table><thead><tr><th>Popis z e-shopu</th><th style="width:96px">Datum</th><th style="width:190px">Komponenta</th>
       <th class="r" style="width:52px">Ks</th>
@@ -4394,6 +4415,7 @@ document.addEventListener("click",e=>{
     zobrazKosikNahled(kosikCache);
     return}
   if(t.id==="kosikDoruceni"){kosikDoruceni=t.value||null;return}
+  if(t.id==="kosikZapl"){kosikZaplaceno=t.checked;return}
   if(t.id==="kosikDodavatel"){
     if(kosikCache){for(const x of kosikCache)x.dodavatel=t.value;
       t.setAttribute("style","max-width:170px;"+stylDodavatele(t.value))}
@@ -4415,11 +4437,14 @@ document.addEventListener("click",e=>{
     const pole=$("#kosikDoruceni");
     const dor=(pole&&pole.value)||kosikDoruceni||null;
     for(const x of kosikCache)D.nakupy.push({id:uid(),datum:x.datum||dnesni,komp:x.komp,popis:x.popis,
-      dodavatel:x.dodavatel,ks:x.ks,cena:kosikBezDph?naDph(x.cena):x.cena,dodano:null,zaskl:0,zaplaceno:false,vratka:null,
+      dodavatel:x.dodavatel,ks:x.ks,cena:kosikBezDph?naDph(x.cena):x.cena,dodano:null,zaskl:0,
+      zaplaceno:kosikZaplaceno,vratka:null,
       vyber:!objednano,doruceni:dor,odkaz:x.odkaz});
-    const n=kosikCache.length; kosikCache=null; kosikDoruceni=null; $("#modal").hidden=true;
+    const n=kosikCache.length; const bylZapl=kosikZaplaceno;
+    kosikCache=null; kosikDoruceni=null; kosikZaplaceno=false; $("#modal").hidden=true;
     nkKat=""; nkDod=""; renderNakupy(); persist();
-    toast(n+" nákupů vloženo jako "+(objednano?"objednané":"vybrané")+(dor?", doručení "+czDatum(dor):""));return}
+    toast(n+" nákupů vloženo jako "+(objednano?"objednané":"vybrané")
+      +(dor?", doručení "+czDatum(dor):"")+(bylZapl?", zaplaceno":""));return}
   if(t.id==="nkVse"){zobrazVse()}
   if(t.id==="vseZrus"){vseCache=null;$("#modal").hidden=true}
   if(t.id==="vseOk"){vsePotvrd(false)}
