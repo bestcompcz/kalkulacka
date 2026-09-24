@@ -1235,7 +1235,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=180;
+const VERZE=181;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2323,15 +2323,19 @@ function kOdpisu(txt){
        se odečítají stejně jako běžný prodej. */
     if(typ!=="product"&&typ!=="bazaar")continue;
     const C=r.code||"", poc=Number(String(r.orderItemAmount??r.itemAmount??1).replace(",","."))||1;
-    if(videno.has(C+"|"+kod)){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),
-      stav:"duplicitní řádek"});continue}
+    /* Cena z objednávky, jen pro přehled v potvrzení. Eura přepočteme kurzem,
+       ve kterém je počet eur za korunu, takže se dělí. */
+    const kurz=Number(String(r.currencyExchangeRate??1).replace(",","."))||1;
+    const jedn=Number(String(r.orderItemUnitPriceWithVat??0).replace(/\s/g,"").replace(",","."))||0;
+    const castka=Math.round((String(r.currencyCode||"CZK")!=="CZK"?jedn/kurz:jedn)*poc);
+    if(videno.has(C+"|"+kod)){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"duplicitní řádek"});continue}
     videno.add(C+"|"+kod);
-    if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:"",dat:(r.date||"").slice(0,10),stav:"již odepsáno"});continue}
+    if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"již odepsáno"});continue}
     /* Objednávka starší než revize skladu je v jeho stavu už zahrnutá. Feed ji posílá
        podle času poslední změny, takže sem doputuje i dva roky stará reklamace. */
     const den=(r.date||"").slice(0,10);
     if(D.odpisyOd&&den&&den<D.odpisyOd){
-      obj.push({C,kod,nazev:r.orderItemName||"",dat:den,stav:"před revizí"});continue}
+      obj.push({C,kod,nazev:r.orderItemName||"",dat:den,ks:poc,castka,stav:"před revizí"});continue}
     const s=najdiSestavu(kod);
     if(!s){
       /* Bez podmínky na neprázdný kód by se prázdno rovnalo prázdnu
@@ -2341,15 +2345,14 @@ function kOdpisu(txt){
       /* Bez kódu nebo s neznámým kódem zkusíme položku poznat podle názvu z e-shopu. */
       const nazevProdeje=r.orderItemName||r.itemName||"";
       if(!z)z=komponentaZNazvuProdeje(nazevProdeje);
-      if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),stav:"neomezené"})}
-      else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),
-        stav:kod?"zboží":"podle názvu"})}
+      if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"neomezené"})}
+      else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:kod?"zboží":"podle názvu"})}
       /* Položka bez kódu bývá jednorázová služba nebo doúčtování — ze skladu se
          nic odečítat nemá. Jen se vypíše a Lukáš ji odklikne. Nenapárovaný KÓD
          je jiná věc: tam se nejspíš nepodařilo poznat komponentu. */
-      else if(!kod){obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),stav:"služba, neodečítá se"});
+      else if(!kod){obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"služba, neodečítá se"});
         sluzby.push(C+" · "+nazevProdeje)}
-      else {obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),stav:"NEZNÁMÝ KÓD"});
+      else {obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"NEZNÁMÝ KÓD"});
         chyby.push(kod)}
       continue;
     }
@@ -2385,7 +2388,7 @@ function kOdpisu(txt){
       info=" · osazen jen jeden chladič";
     }
     for(const[i,q]of m) if(q>0){pr(suma,i,q);zaz(i,q,(r.date||"").slice(0,10))}
-    obj.push({C,kod,nazev:s.nazev+pot+info,dat:(r.date||"").slice(0,10),stav:pot?"s výhradou":"ok"});
+    obj.push({C,kod,nazev:s.nazev+pot+info,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:pot?"s výhradou":"ok"});
   }
   nahradRam(suma,obj,poDat);
   return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)]};
@@ -2471,19 +2474,31 @@ function zobrazOdpis(){
   const L=[...R.suma].map(([id,q])=>{const k=najdiKomp(id);return{k,q}}).filter(x=>x.k)
     .sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
   /* Které objednávky se právě odepisují — ať je vidět, co tabulka představuje. */
-  const odepisovane=[...new Map(R.obj
-    .filter(o=>["ok","zboží","podle názvu","s výhradou"].includes(o.stav))
-    .map(o=>[o.C,o.dat])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  /* Položky, které se opravdu odečtou — s datem, kódem, názvem a cenou z objednávky. */
+  const polozky=R.obj.filter(o=>["ok","zboží","podle názvu","s výhradou"].includes(o.stav))
+    .sort((a,b)=>String(a.dat).localeCompare(String(b.dat))||String(a.C).localeCompare(String(b.C)));
+  const odepisovane=[...new Map(polozky.map(o=>[o.C,o.dat])).entries()]
+    .sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const dny=[...new Set(odepisovane.map(x=>x[1]).filter(Boolean))];
   const rozsah=dny.length?(dny.length===1?czDatum(dny[0]):czDatum(dny[0])+" – "+czDatum(dny[dny.length-1])):"";
   $("#mTitle").textContent="Odepsat ze skladu";
   $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Ceny se nemění, mění se jen množství.</p>
-    <div style="background:#F1FAF4;border:1px solid #CFE8DA;border-radius:8px;padding:10px 12px;margin-bottom:12px">
-      <div style="font-size:12.5px;font-weight:700;margin-bottom:6px">
-        ${odepisovane.length} ${odepisovane.length===1?"objednávka":odepisovane.length<5?"objednávky":"objednávek"}${rozsah?" · "+rozsah:""}</div>
-      <div style="font-size:11.5px;color:var(--ink-2);line-height:1.7">
-        ${odepisovane.map(([c,d])=>`<span style="display:inline-block;margin-right:12px;white-space:nowrap">
-          <strong>${esc(c)}</strong> <span class="muted">${esc(czDatum(d))}</span></span>`).join("")}</div>
+    <div style="background:#F1FAF4;border:1px solid #CFE8DA;border-radius:8px;padding:10px 12px;margin-bottom:14px">
+      <div style="font-size:12.5px;font-weight:700;margin-bottom:8px">
+        ${odepisovane.length} ${odepisovane.length===1?"objednávka":odepisovane.length<5?"objednávky":"objednávek"}${rozsah?" · "+rozsah:""}
+        <span class="muted" style="font-weight:400">· celkem ${kc(polozky.reduce((a,o)=>a+(o.castka||0),0))}</span></div>
+      <div class="tbl"><table><thead><tr>
+        <th style="width:92px">Datum</th><th style="width:100px">Objednávka</th>
+        <th style="width:86px">Kód</th><th>Co se odečte</th>
+        <th class="r" style="width:44px">Ks</th><th class="r" style="width:104px">Cena s DPH</th></tr></thead><tbody>
+        ${polozky.map(o=>`<tr>
+          <td class="num" style="font-size:11.5px">${esc(czDatum(o.dat))}</td>
+          <td class="num" style="font-size:11.5px"><strong>${esc(o.C)}</strong></td>
+          <td class="num" style="font-size:11.5px">${esc(o.kod||"—")}</td>
+          <td style="font-size:12px">${esc((o.nazev||"").slice(0,58))}</td>
+          <td class="r num">${o.ks||1}</td>
+          <td class="r num">${kc(o.castka||0)}</td></tr>`).join("")}
+      </tbody></table></div>
     </div>
     <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Skladem</th><th class="r">Odečíst</th><th class="r">Zůstane</th></tr></thead><tbody>
     ${L.map(x=>{const ks=Number(x.k.ks)||0,zb=ks-x.q;return `<tr${zb<0?' style="background:#FDECEA"':''}>
