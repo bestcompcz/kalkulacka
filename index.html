@@ -1235,7 +1235,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=177;
+const VERZE=179;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1308,7 +1308,7 @@ async function cloudNacti(potvrdit){
       +`Načíst i tak? Uložením bys pak mohl data poškodit.`))return;
     if(potvrdit&&cloudZmena&&!confirm(
       `Máš tu neuložené změny. Načtením z cloudu o ně přijdeš.\n\n`
-      +`TADY  ${popisDat(D)}\nV CLOUDU  ${popisDat(nova)}\n\n`
+      +`Rozdíly proti tomu, co je tady:\n${rozdilDat(D,nova)}\n\n`
       +`Kopie současného stavu zůstane v prohlížeči, půjde vrátit tlačítkem Vrátit poslední načtení.\n\n`
       +`Pokračovat?`))return;
     zalohujPredPrepsanim("načtení z cloudu");
@@ -1324,6 +1324,15 @@ const pocty=d=>({nákupů:(d.nakupy||[]).length,sestav:(d.sestavy||[]).length,
   komponent:Object.values(d.komponenty||{}).reduce((a,x)=>a+x.length,0),
   odpisů:(d.odpisy||[]).length,příplatků:(d.priplatky||[]).length,nabídek:(d.nabidky||[]).length});
 const popisDat=d=>Object.entries(pocty(d)).map(([k,v])=>k+" "+v).join(", ");
+/* Porovnání dvou stavů: vypíše jen to, v čem se liší, a o kolik. */
+function rozdilDat(tady,cloud){
+  const a=pocty(tady), b=pocty(cloud), radky=[];
+  for(const k of Object.keys(a)){
+    const r=(b[k]||0)-(a[k]||0);
+    if(r)radky.push("• "+k+": v cloudu o "+Math.abs(r)+" "+(r>0?"víc":"míň")+"  ("+a[k]+" → "+b[k]+")");
+  }
+  return radky.length?radky.join("\n"):"• v počtech se neliší nic — může jít jen o úpravy hodnot";
+}
 async function cloudUloz(tiche){
   if(!cloudOk()){toast("Nejdřív vyplň repozitář a token v Nastavení");return}
   if(cloudBezi)return; cloudBezi=true; renderCloud();
@@ -2307,7 +2316,9 @@ function kOdpisu(txt){
     const kod=String(r.orderItemCode??r.itemCode??"").trim();
     const typ=r.orderItemType!==undefined?String(r.orderItemType)
       :(/^(SHIPPING|BILLING|CGSRCHRG|DISCOUNT|GIFT)/i.test(kod)||!kod?"jine":"product");
-    if(typ!=="product")continue;
+    /* Bazarové položky (repasovaná PC) jsou v exportu typu bazaar, ale ze skladu
+       se odečítají stejně jako běžný prodej. */
+    if(typ!=="product"&&typ!=="bazaar")continue;
     const C=r.code||"", poc=Number(String(r.orderItemAmount??r.itemAmount??1).replace(",","."))||1;
     if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:"",dat:(r.date||"").slice(0,10),stav:"již odepsáno"});continue}
     /* Objednávka starší než revize skladu je v jeho stavu už zahrnutá. Feed ji posílá
