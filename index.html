@@ -1235,7 +1235,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=176;
+const VERZE=177;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2453,8 +2453,21 @@ function zobrazOdpis(){
   if(!R.suma.size){toast("Nic nového k odepsání");return}
   const L=[...R.suma].map(([id,q])=>{const k=najdiKomp(id);return{k,q}}).filter(x=>x.k)
     .sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
+  /* Které objednávky se právě odepisují — ať je vidět, co tabulka představuje. */
+  const odepisovane=[...new Map(R.obj
+    .filter(o=>["ok","zboží","podle názvu","s výhradou"].includes(o.stav))
+    .map(o=>[o.C,o.dat])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  const dny=[...new Set(odepisovane.map(x=>x[1]).filter(Boolean))];
+  const rozsah=dny.length?(dny.length===1?czDatum(dny[0]):czDatum(dny[0])+" – "+czDatum(dny[dny.length-1])):"";
   $("#mTitle").textContent="Odepsat ze skladu";
   $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Ceny se nemění, mění se jen množství.</p>
+    <div style="background:#F1FAF4;border:1px solid #CFE8DA;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:12.5px;font-weight:700;margin-bottom:6px">
+        ${odepisovane.length} ${odepisovane.length===1?"objednávka":odepisovane.length<5?"objednávky":"objednávek"}${rozsah?" · "+rozsah:""}</div>
+      <div style="font-size:11.5px;color:var(--ink-2);line-height:1.7">
+        ${odepisovane.map(([c,d])=>`<span style="display:inline-block;margin-right:12px;white-space:nowrap">
+          <strong>${esc(c)}</strong> <span class="muted">${esc(czDatum(d))}</span></span>`).join("")}</div>
+    </div>
     <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Skladem</th><th class="r">Odečíst</th><th class="r">Zůstane</th></tr></thead><tbody>
     ${L.map(x=>{const ks=Number(x.k.ks)||0,zb=ks-x.q;return `<tr${zb<0?' style="background:#FDECEA"':''}>
       <td>${esc(x.k.nazev)}</td><td class="r num">${ks}</td>
