@@ -1235,7 +1235,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=179;
+const VERZE=180;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2311,6 +2311,9 @@ function kOdpisu(txt){
   /* U každého odepisovaného kusu si pamatujeme datum objednávky — náhrada pamětí
      se pak rozhoduje podle toho, co bylo skladem v den objednávky, ne dnes. */
   const poDat=new Map();
+  /* Tatáž položka téže objednávky se smí započítat jen jednou, i kdyby byla
+     v souboru vícekrát — dávky se v cloudu mohou překrývat. */
+  const videno=new Set();
   const zaz=(i,q,dat)=>{if(!i)return;if(!poDat.has(i))poDat.set(i,[]);poDat.get(i).push({dat,q})};
   for(const r of radky){
     const kod=String(r.orderItemCode??r.itemCode??"").trim();
@@ -2320,6 +2323,9 @@ function kOdpisu(txt){
        se odečítají stejně jako běžný prodej. */
     if(typ!=="product"&&typ!=="bazaar")continue;
     const C=r.code||"", poc=Number(String(r.orderItemAmount??r.itemAmount??1).replace(",","."))||1;
+    if(videno.has(C+"|"+kod)){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),
+      stav:"duplicitní řádek"});continue}
+    videno.add(C+"|"+kod);
     if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:"",dat:(r.date||"").slice(0,10),stav:"již odepsáno"});continue}
     /* Objednávka starší než revize skladu je v jeho stavu už zahrnutá. Feed ji posílá
        podle času poslední změny, takže sem doputuje i dva roky stará reklamace. */
@@ -2444,7 +2450,7 @@ function zobrazOdpis(){
        šedá se přeskočí, žlutá chce jen odkliknout. */
     o.stav==="ok"?"#F1FAF4"
     :(o.stav==="zboží"||o.stav==="podle názvu")?"#F7FAFF"
-    :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené")?"#F3F4F6"
+    :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené"||o.stav==="duplicitní řádek")?"#F3F4F6"
     :o.stav==="služba, neodečítá se"?"#FFF8E1"
     :"#FDECEA"}">
     <td class="num">${esc(o.C)}</td><td class="num">${esc(o.kod)}</td>
@@ -2453,7 +2459,7 @@ function zobrazOdpis(){
     <td><span class="band">${o.stav}</span></td></tr>`).join("")
     ||'<tr><td colspan="5" style="padding:22px;text-align:center;color:var(--ink-3)">Nic k odepsání.</td></tr>';
   const nove=R.obj.filter(o=>o.stav!=="již odepsáno"&&o.stav!=="NEZNÁMÝ KÓD"
-    &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se").length;
+    &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se"&&o.stav!=="duplicitní řádek").length;
   $("#pdSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Položek v souboru</div><div class="price" style="font-size:20px">${R.obj.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">K odepsání</div><div class="price" style="font-size:20px;color:var(--ok)">${nove}</div></div>
     <div><div class="muted" style="font-size:11.5px">Problémů</div><div class="price" style="font-size:20px;color:${R.chyby.length?"var(--bad)":"var(--ink-3)"}">${R.chyby.length}</div></div>`;
