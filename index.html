@@ -973,12 +973,18 @@ function varianty(s){
   const Sk=D.komponenty["Skříň"]||[], zaklad=spocti(s), out=[];
   const baseId=s.vyber["Skříň"]; if(!baseId)return out;
   const base=najdiKomp(baseId); if(!base)return out;
-  const h0=Number(D.skrine.hodnoty[baseId]); if(!isFinite(h0))return out;
+  /* Skříň bez zadané hodnoty do žebříčku nepatří a sestava s ní je jednovariantní.
+     Prázdná hodnota se nesmí brát jako nula, jinak by se varianty tvořily proti ní. */
+  const h0raw=D.skrine.hodnoty[baseId];
+  if(h0raw===null||h0raw===undefined||h0raw==="")return out;
+  const h0=Number(h0raw); if(!isFinite(h0))return out;
   const modul=D.skrine.extra.modul?najdiKomp(D.skrine.extra.modul):null;
   const e0=D.skrine.extra.skrine[baseId]&&maDeskuProModul(s)?(Number(D.skrine.extra.castka)||0):0;
   for(const k of Sk){
     if(!D.skrine.zebricek[k.id])continue;
-    const hv=Number(D.skrine.hodnoty[k.id]); if(!isFinite(hv))continue;
+    const hvRaw=D.skrine.hodnoty[k.id];
+    if(hvRaw===null||hvRaw===undefined||hvRaw==="")continue;
+    const hv=Number(hvRaw); if(!isFinite(hv))continue;
     if(hv<h0)continue;
     const extraOk=!!(D.skrine.extra.skrine[k.id]&&maDeskuProModul(s));
     const extra=extraOk?(Number(D.skrine.extra.castka)||0):0;
@@ -1235,7 +1241,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=182;
+const VERZE=183;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
