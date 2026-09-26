@@ -1235,7 +1235,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=181;
+const VERZE=182;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4584,7 +4584,12 @@ function dl(name,text,mime){
     const a=document.createElement("a");
     a.href=url; a.download=name; a.style.display="none";
     document.body.appendChild(a); a.click();
-    setTimeout(()=>{a.remove();URL.revokeObjectURL(url);hotovo()},1200);
+    a.remove();
+    /* Další soubor pustíme až za dvě a půl vteřiny, jinak ho prohlížeč nestihne
+       založit. A odkaz na data držíme ještě půl minuty — když se uvolní dřív,
+       než prohlížeč soubor dopíše, zůstane viset nedotažený. */
+    setTimeout(hotovo,2500);
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
   }));
 }
 
