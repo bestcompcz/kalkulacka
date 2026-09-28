@@ -686,7 +686,8 @@ function fresh(){
   return d;
 }
 function uid(){return Math.random().toString(36).slice(2,9)}
-function novaSestava(n){return{id:uid(),nazev:n||"Nová sestava",vyber:{},prace:null}}
+function novaSestava(n){return{id:uid(),nazev:n||"Nová sestava",vyber:{},prace:null,
+  kod:"",pairCode:"",url:"",marze:null,vyp:{},kategorie:[],excel:null,drzena:null}}
 
 /* --------- persistence: localStorage když jde, jinak jen paměť --------- */
 const KEY="bestcomp-kalk-v2";
@@ -1206,12 +1207,12 @@ function buildCard(s){
       ${(()=>{const P=priplatkySestavy(s);if(!P.length)return"";
         const g={};for(const p of P){const k=paramPriplatku(p);(g[k]=g[k]||[]).push(p)}
         return `<div class="vars"><div style="padding:7px 12px 3px;font-size:10.5px;text-transform:uppercase;
-          letter-spacing:.06em;color:var(--ink-3);font-weight:700">Příplatky (${P.filter(p=>!s.vyp[p.id]).length}/${P.length})</div>
+          letter-spacing:.06em;color:var(--ink-3);font-weight:700">Příplatky (${P.filter(p=>!(s.vyp||{})[p.id]).length}/${P.length})</div>
           <div style="padding:0 12px 10px;column-width:290px;column-gap:22px">${Object.entries(g).map(([par,lst])=>
           `<div style="break-inside:avoid;margin-bottom:7px"><div style="font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em">${esc(par)}</div>
            ${lst.map(p=>`<div class="row" style="gap:5px;font-size:11.5px;padding:0;line-height:1.55">
-             <input type="checkbox" style="width:auto;cursor:pointer" data-sp="${s.id}" data-pp="${p.id}" ${s.vyp[p.id]?"":"checked"}>
-             <span style="${s.vyp[p.id]?"opacity:.45;text-decoration:line-through":""}">${esc(p.nazev)}</span>
+             <input type="checkbox" style="width:auto;cursor:pointer" data-sp="${s.id}" data-pp="${p.id}" ${(s.vyp||{})[p.id]?"":"checked"}>
+             <span style="${(s.vyp||{})[p.id]?"opacity:.45;text-decoration:line-through":""}">${esc(p.nazev)}</span>
              <span class="num muted" style="margin-left:auto">${kc(surPlati(p)||0)}</span></div>`).join("")}</div>`).join("")}</div></div>`})()}
       ${(()=>{const V=varianty(s);if(!V.length)return"";
         return `<div class="vars"><details><summary style="cursor:pointer;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:700">Varianty skříně (${V.length})</summary><div class="tbl"><table><thead><tr><th>Varianta skříně</th><th>Příplatek</th><th>Nákup</th><th>Cena</th><th>Marže</th></tr></thead><tbody>
@@ -1241,7 +1242,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=183;
+const VERZE=184;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3584,7 +3585,7 @@ function exportSestavy(id){
   for(const kod of kody)rc.push([kod,pairProKod(kod,s),String(cenaVarianty(kod))]);
   dl(`shoptet-${zaklad}-ceny-${dnes()}.csv`,csv(bezNulovychCen(rc)),"text/csv");
   /* 2 · příplatky */
-  const pary=[...new Set(priplatkySestavy(s).filter(p=>!s.vyp[p.id]).map(paramPriplatku))].sort();
+  const pary=[...new Set(priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]).map(paramPriplatku))].sort();
   let poc=0;
   if(pary.length){
     /* Shoptet vyžaduje u každého parametru čtveřici sloupců. Tři doplňkové necháváme
@@ -3592,7 +3593,7 @@ function exportSestavy(id){
     const rp=[["code","pairCode",...pary.flatMap(x=>["surchargeParameter:"+x,
       "surchargeParameter:"+x+":requiredValue","surchargeParameter:"+x+":currency",
       "surchargeParameter:"+x+":includingVat"])]];
-    const bunky=pary.flatMap(par=>[priplatkySestavy(s).filter(p=>!s.vyp[p.id]&&paramPriplatku(p)===par)
+    const bunky=pary.flatMap(par=>[priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]&&paramPriplatku(p)===par)
       .map(p=>`${(p.eshop||p.nazev)}=${surPlati(p)||0}`).join(";"),SUR_POVINNY,SUR_MENA,SUR_SDPH]);
     for(const kod of kody){rp.push([kod,pairProKod(kod,s),...bunky]);poc++}
     dl(`shoptet-${zaklad}-priplatky-${dnes()}.csv`,csv(rp),"text/csv");
@@ -4192,7 +4193,23 @@ document.addEventListener("click",e=>{
   if(t.dataset.delcat){if(confirm(`Smazat kategorii ${t.dataset.delcat} i s komponentami?`)){delete D.komponenty[t.dataset.delcat];renderAll()}}
   if(t.id==="sortAll"){serad(D);renderAll();toast("Seřazeno")}
   if(t.id==="addCat"){const n=$("#newCat").value.trim();if(n&&!D.komponenty[n]){D.komponenty[n]=[];$("#newCat").value="";renderAll()}}
-  if(t.id==="addBuild"){D.sestavy.push(novaSestava());renderSest();persist()}
+  if(t.id==="addBuild"){
+    /* Nová sestava se přidává na konec a filtr ji může schovat — zrušíme filtry,
+       kartu rozbalíme a odscrollujeme na ni, ať je hned vidět. */
+    const nova=novaSestava();
+    D.sestavy.push(nova);
+    sestQ=""; fCpu=""; fGpu="";
+    const pole=$("#sestHledat"); if(pole)pole.value="";
+    sestOtevrene[nova.id]=true;
+    renderSest(); persist();
+    setTimeout(()=>{
+      const karta=document.querySelector(`[data-card="${nova.id}"]`);
+      if(karta&&karta.scrollIntoView)karta.scrollIntoView({behavior:"smooth",block:"center"});
+      const naz=document.querySelector(`[data-sn="${nova.id}"]`);
+      if(naz&&naz.focus){naz.focus(); if(naz.select)naz.select()}
+    },60);
+    toast("Nová sestava přidána — vyplň název a kód");
+  }
   if(t.dataset.dels){
     const s=D.sestavy.find(x=>x.id===t.dataset.dels); if(!s)return;
     const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
@@ -4352,7 +4369,7 @@ document.addEventListener("click",e=>{
     dl(`sestavy-prehled-${dnes()}.csv`,csv(rows),"text/csv");toast("Přehled stažen")}
   if(t.id==="expShoptet"){
     const pary=new Set();
-    for(const s of D.sestavy)for(const p of priplatkySestavy(s))if(!s.vyp[p.id])pary.add(paramPriplatku(p));
+    for(const s of D.sestavy)for(const p of priplatkySestavy(s))if(!(s.vyp||{})[p.id])pary.add(paramPriplatku(p));
     const sl=[...pary].sort();
     const rows=[["code","pairCode",...sl.flatMap(x=>["surchargeParameter:"+x,
       "surchargeParameter:"+x+":requiredValue","surchargeParameter:"+x+":currency",
@@ -4361,7 +4378,7 @@ document.addEventListener("click",e=>{
     for(const s of D.sestavy){
       const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
       if(!kody.length){bezKodu++;continue}
-      const bunky=sl.flatMap(par=>[priplatkySestavy(s).filter(p=>!s.vyp[p.id]&&paramPriplatku(p)===par)
+      const bunky=sl.flatMap(par=>[priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]&&paramPriplatku(p)===par)
         .map(p=>`${(p.eshop||p.nazev)}=${surPlati(p)||0}`).join(";"),SUR_POVINNY,SUR_MENA,SUR_SDPH]);
       for(const k of kody)rows.push([k,pairProKod(k,s),...bunky]);
     }
