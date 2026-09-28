@@ -1169,12 +1169,12 @@ function buildCard(s){
         :`
         <div class="hlavicka">
           ${kodZ?`<span class="band" style="background:rgba(255,255,255,.7);font-weight:700">${esc(kodZ)}</span>`:""}
-          ${s.drzena!=null?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700"
-            title="Cena na e-shopu je držená, výpočet dává ${kc(c.prodej)}">držím ${kc(s.drzena)}</span>`:""}
           <span class="hcpu">${esc(cpu||"— bez CPU —")}</span>
           <span class="hgpu">${esc(gpu||"")}</span>
           <span class="hdetail">${strucne}</span>
         </div>
+        ${s.drzena!=null?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700;margin-right:8px;white-space:nowrap"
+          title="Cena na e-shopu je držená, výpočet dává ${kc(c.prodej)}">držím ${kc(s.drzena)}</span>`:""}
         <span class="hcena">${kc(c.prodej)}</span>`}
       </header>
       <div class="bwrap">
@@ -1244,7 +1244,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=185;
+const VERZE=186;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
