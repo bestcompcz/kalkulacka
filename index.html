@@ -981,8 +981,10 @@ function varianty(s){
   const h0=Number(h0raw); if(!isFinite(h0))return out;
   const modul=D.skrine.extra.modul?najdiKomp(D.skrine.extra.modul):null;
   const e0=D.skrine.extra.skrine[baseId]&&maDeskuProModul(s)?(Number(D.skrine.extra.castka)||0):0;
+  /* Základní skříň sestavy patří do výpisu vždy, i když v žebříčku není —
+     jinak by se její varianta počítala podle jiné skříně se stejnou hodnotou. */
   for(const k of Sk){
-    if(!D.skrine.zebricek[k.id])continue;
+    if(!D.skrine.zebricek[k.id]&&k.id!==baseId)continue;
     const hvRaw=D.skrine.hodnoty[k.id];
     if(hvRaw===null||hvRaw===undefined||hvRaw==="")continue;
     const hv=Number(hvRaw); if(!isFinite(hv))continue;
@@ -1242,7 +1244,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=184;
+const VERZE=185;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
