@@ -1266,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=192;
+const VERZE=193;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3291,8 +3291,20 @@ function analyzaVse(){
     sest.push({...g,duvod:[...g.duvod],nejPred,nejPo,lvlZmena:lvlPred!==lvlPo?[lvlPred,lvlPo]:null,
       drzena:g.s.drzena!=null?Number(g.s.drzena):null});
   }
+  /* Držené sestavy, kde se výpočet rozešel s drženou cenou. Do exportů nejdou,
+     takže se na ně jinak nepřijde — proto se vypisují při každém přepočtu. */
+  const drzeneRozdily=[];
+  for(const s2 of D.sestavy){
+    if(s2.drzena==null)continue;
+    const kodyV=Object.keys(po).filter(k=>po[k].s===s2);
+    if(!kodyV.length)continue;
+    const nej=Math.min(...kodyV.map(k=>po[k].c));
+    const rozdil=nej-Number(s2.drzena);
+    if(rozdil)drzeneRozdily.push({s:s2,drzena:Number(s2.drzena),vypocet:nej,rozdil});
+  }
+  drzeneRozdily.sort((a,b)=>Math.abs(b.rozdil)-Math.abs(a.rozdil));
   sest.sort((a,b)=>COLL.compare(a.s.nazev,b.s.nazev));
-  return{nask,ceny,sest,pripl,nula:[]};
+  return{nask,ceny,sest,pripl,drzeneRozdily,nula:[]};
 }
 function zobrazVse(){
   const A=analyzaVse();
@@ -3334,6 +3346,15 @@ function zobrazVse(){
         <td class="r num" style="color:${z.prum>z.stara?"var(--bad)":"var(--ok)"}">${z.prum>z.stara?"+":""}${Math.round(z.prum-z.stara)}</td></tr>`).join("")}
       </tbody></table></div>`:""}
   </div>
+  ${(A.drzeneRozdily||[]).length?`<div style="margin-bottom:16px;background:#FDEBE9;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px">
+    <h3 style="margin:0 0 6px;font-size:13px;color:#A03027">Pozor — držené ceny už nesedí s výpočtem (${A.drzeneRozdily.length})</h3>
+    <p class="hint" style="margin:0 0 8px">Tyhle sestavy se do exportů nedostanou, dokud držení nezrušíš na jejich kartě.</p>
+    <div class="tbl"><table><thead><tr><th>Sestava</th><th class="r">Drží se</th><th class="r">Výpočet</th><th class="r">Rozdíl</th></tr></thead><tbody>
+    ${A.drzeneRozdily.map(x=>`<tr>
+      <td><strong>${esc(x.s.nazev)}</strong> <span class="muted">${esc((x.s.kod||"").split(",")[0].trim())}</span></td>
+      <td class="r num">${kc(x.drzena)}</td><td class="r num">${kc(x.vypocet)}</td>
+      <td class="r num" style="font-weight:700;color:${x.rozdil>0?"var(--bad)":"var(--ok)"}">${x.rozdil>0?"+":""}${Math.round(x.rozdil)}</td></tr>`).join("")}
+    </tbody></table></div></div>`:""}
   <div style="margin-bottom:4px">
     <h3 style="margin:0 0 6px;font-size:13px">3 · Ceny sestav${A.sest.length?" — "+A.sest.length:" — beze změny"}</h3>
     ${A.sest.length?`<p class="hint" style="margin:0 0 8px">Zaškrtnuté ceny půjdou do CSV pro Shoptet. Odškrtnutá sestava si drží cenu, kterou má na e-shopu, a příště přijde odškrtnutá s poznámkou.</p>
