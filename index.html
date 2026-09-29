@@ -1266,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=193;
+const VERZE=195;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3300,7 +3300,13 @@ function analyzaVse(){
     if(!kodyV.length)continue;
     const nej=Math.min(...kodyV.map(k=>po[k].c));
     const rozdil=nej-Number(s2.drzena);
-    if(rozdil)drzeneRozdily.push({s:s2,drzena:Number(s2.drzena),vypocet:nej,rozdil});
+    if(rozdil){
+      /* Kolik na sestavě zbude, když se drží pod výpočtem — ať je vidět dopad. */
+      const c=spocti(s2);
+      drzeneRozdily.push({s:s2,drzena:Number(s2.drzena),vypocet:nej,rozdil,
+        marze:Math.round(bezDph(Number(s2.drzena))-bezDph(c.nakup)),
+        marzePasmo:Math.round(bezDph(nej)-bezDph(c.nakup))});
+    }
   }
   drzeneRozdily.sort((a,b)=>Math.abs(b.rozdil)-Math.abs(a.rozdil));
   sest.sort((a,b)=>COLL.compare(a.s.nazev,b.s.nazev));
@@ -3349,11 +3355,19 @@ function zobrazVse(){
   ${(A.drzeneRozdily||[]).length?`<div style="margin-bottom:16px;background:#FDEBE9;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px">
     <h3 style="margin:0 0 6px;font-size:13px;color:#A03027">Pozor — držené ceny už nesedí s výpočtem (${A.drzeneRozdily.length})</h3>
     <p class="hint" style="margin:0 0 8px">Tyhle sestavy se do exportů nedostanou, dokud držení nezrušíš na jejich kartě.</p>
-    <div class="tbl"><table><thead><tr><th>Sestava</th><th class="r">Drží se</th><th class="r">Výpočet</th><th class="r">Rozdíl</th></tr></thead><tbody>
+    <div class="tbl"><table><thead><tr><th>Sestava</th><th class="r" style="width:104px">Drží se</th>
+      <th class="r">Výpočet</th><th class="r">Rozdíl</th><th class="r" title="Marže při držené ceně">Marže drž.</th>
+      <th style="width:96px"></th></tr></thead><tbody>
     ${A.drzeneRozdily.map(x=>`<tr>
       <td><strong>${esc(x.s.nazev)}</strong> <span class="muted">${esc((x.s.kod||"").split(",")[0].trim())}</span></td>
-      <td class="r num">${kc(x.drzena)}</td><td class="r num">${kc(x.vypocet)}</td>
-      <td class="r num" style="font-weight:700;color:${x.rozdil>0?"var(--bad)":"var(--ok)"}">${x.rozdil>0?"+":""}${Math.round(x.rozdil)}</td></tr>`).join("")}
+      <td class="r"><input type="number" class="px" value="${x.drzena}" data-drzc="${x.s.id}"
+        title="Cena, kterou chceš držet — přepiš a potvrď Enterem" style="text-align:right;font-weight:700"></td>
+      <td class="r num">${kc(x.vypocet)}</td>
+      <td class="r num" style="font-weight:700;color:${x.rozdil>0?"var(--bad)":"var(--ok)"}">${x.rozdil>0?"+":""}${Math.round(x.rozdil)}</td>
+      <td class="r num" style="color:${x.marze<0?"var(--bad)":"var(--ink-2)"}">${kc(x.marze)}${
+        x.marzePasmo?` <span class="muted" style="font-size:10.5px">z ${kc(x.marzePasmo)}</span>`:""}</td>
+      <td class="r"><button class="btn btn-sm" data-odrz="${x.s.id}" data-znovu="1"
+        title="Zrušit držení — cena půjde do nejbližšího exportu">Pustit cenu</button></td></tr>`).join("")}
     </tbody></table></div></div>`:""}
   <div style="margin-bottom:4px">
     <h3 style="margin:0 0 6px;font-size:13px">3 · Ceny sestav${A.sest.length?" — "+A.sest.length:" — beze změny"}</h3>
@@ -4262,6 +4276,14 @@ document.addEventListener("input",e=>{
   const t=e.target;
   if(t.closest&&t.closest(".hledat"))osvezKrizky();
   if(t.id==="prHledat"){prQ=t.value;renderPripravene();return}
+  if(t.dataset.drzc){
+    const s=D.sestavy.find(x=>x.id===t.dataset.drzc);
+    if(s){
+      s.drzena=t.value===""?null:Number(t.value);
+      renderSest(); persist();
+      if(!$("#modal").hidden)zobrazVse();          // překreslíme okno, ať sedí rozdíl i marže
+    }
+    return}
   if(t.dataset.nb){const n=nbNajdi(); if(n){
       n[t.dataset.nb]=["marze","prace","windows"].includes(t.dataset.nb)?(t.value===""?null:Number(t.value)):t.value;
       osvezNabRadek(t,{ks:0,cena:0}); persist();return}}
@@ -4661,7 +4683,10 @@ document.addEventListener("click",e=>{
     for(const s of D.sestavy)sestOtevrene[s.id]=vse;
     renderSest();return}
   if(t.dataset.odrz){const s=D.sestavy.find(x=>x.id===t.dataset.odrz);
-    if(s){s.drzena=null;renderSest();persist();toast("Držení zrušeno, platí vypočtená cena")}return}
+    if(s){s.drzena=null;renderSest();persist();toast("Držení zrušeno, platí vypočtená cena");
+      /* Když se pustilo z okna naskladnění, překreslíme ho, ať řádek zmizí. */
+      if(t.dataset.znovu&&!$("#modal").hidden)zobrazVse();}
+    return}
   if(t.dataset.exps){exportSestavy(t.dataset.exps);return}
   if(t.dataset.dup){const s=D.sestavy.find(s=>s.id===t.dataset.dup);
     if(s){const n=JSON.parse(JSON.stringify(s));n.id=uid();n.nazev=s.nazev+" (kopie)";
