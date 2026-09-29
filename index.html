@@ -1260,7 +1260,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=189;
+const VERZE=190;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4005,6 +4005,9 @@ function renderPripravene(){
           ${skr?`<span class="hgpu">${esc(skr.nazev)}</span>`:""}
           <span class="hdetail">${strucne}</span>
         </div>
+        ${s&&s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener" class="band"
+          style="background:#EAF0FB;color:#2C4C86;font-weight:700;text-decoration:none"
+          title="Otevřít sestavu na e-shopu" data-stop="1">↗</a>`:""}
         ${pocPr?`<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700"
           title="Počítač má příplatky">s příplatky · ${pocPr}</span>`:""}
         ${pc.pozn?`<span class="band" style="background:#FDEBE9;color:#A03027;font-weight:700">${esc(pc.pozn)}</span>`:""}
@@ -4450,7 +4453,7 @@ document.addEventListener("click",e=>{
     if(t.id==="prVlastni"){nc.typ="vlastni";nc.nazev="";nc.slozeni="";nc.nakup=null}
     D.pripravene.push(nc); prOtevrene[nc.id]=true;
     renderPripravene(); persist(); return}
-  if(t.dataset.prbal){
+  if(t.dataset.prbal&&!(e.target.closest&&e.target.closest("[data-stop]"))){
     prOtevrene[t.dataset.prbal]=!prOtevrene[t.dataset.prbal];
     renderPripravene(); return}
   if(t.dataset.prdel){
