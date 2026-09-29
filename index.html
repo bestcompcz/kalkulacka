@@ -566,8 +566,14 @@ tr.unused td{background:#FEFCFB}
     <div style="padding:12px 14px">
       <p class="hint" style="margin:0 0 10px">Díly zastavěné v těchto strojích se ve Skladu odečtou ze sloupce
         <strong>Dostupné</strong>. Ze skladu zmizí až prodejem, tedy odpisem objednávky.</p>
-      <button class="btn btn-sm btn-primary" id="prPridat">Přidat počítač</button>
-      <button class="btn btn-sm" id="prVlastni" title="Stroj ze zbytků, který v ceníku nemáme">Přidat vlastní sestavu</button>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-sm btn-primary" id="prPridat">Přidat počítač</button>
+        <button class="btn btn-sm" id="prVlastni" title="Stroj ze zbytků, který v ceníku nemáme">Přidat vlastní sestavu</button>
+        <span class="hledat" data-obal="prHledat" style="max-width:300px;margin-left:auto">
+          <input type="text" id="prHledat" placeholder="Hledat, např. 9060 XT" style="width:100%">
+          <button class="smaz" data-smaz="prHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
+      </div>
+      <div id="prStat" style="margin-top:12px"></div>
     </div>
   </div>
   <div id="prSeznam"></div>
@@ -1260,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=191;
+const VERZE=192;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2370,6 +2376,7 @@ function dostupne(k){
 }
 let REZ=new Map();
 const prOtevrene={};   // které karty připravených počítačů jsou rozbalené
+let prQ="";            // hledání v připravených
 function pripravenyNakup(pc){
   let n=0;
   for(const[i,q]of pripravenyRozpis(pc)){const k=najdiKomp(i); if(k)n+=q*cena(k)}
@@ -3973,14 +3980,38 @@ function renderPripravene(){
   const nabidka=D.sestavy.filter(x=>(x.kod||"").trim()).map(x=>({id:x.id,popis:popisSestavy(x)}));
   const datalist=`<datalist id="prSestList">${nabidka.map(o=>`<option value="${esc(o.popis)}">`).join("")}</datalist>`;
 
-  let nakupC=0, prodejC=0;
-  const karty=L.map(pc=>{
+  /* Řadíme jako v Sestavách: AMD před Intelem, uvnitř podle ceny procesoru,
+     vlastní sestavy na konec. */
+  const sestPc=pc=>pc.typ==="vlastni"?null:D.sestavy.find(x=>x.id===pc.sest);
+  const cenaCpu=pc=>{const s=sestPc(pc); const i=s&&s.vyber&&s.vyber["CPU"];const k=i?najdiKomp(i):null;return k?cena(k):0};
+  const razene=[...L].sort((a,b)=>{
+    const va=a.typ==="vlastni"?1:0, vb=b.typ==="vlastni"?1:0; if(va!==vb)return va-vb;
+    const sa=sestPc(a), sb=sestPc(b);
+    if(!sa||!sb)return 0;
+    const z=jeIntel(cpuSestavy(sa))-jeIntel(cpuSestavy(sb)); if(z)return z;
+    const d=cenaCpu(a)-cenaCpu(b); if(d)return d;
+    const c=COLL.compare(cpuSestavy(sa),cpuSestavy(sb)); if(c)return c;
+    return pripravenyProdej(a)-pripravenyProdej(b);
+  });
+  /* Hledá se v názvu, kódu, komponentách, skříni i poznámce. */
+  const q=(prQ||"").trim().toLowerCase();
+  const sedi=pc=>{
+    if(!q)return true;
+    const s=sestPc(pc);
+    const komp=s?Object.values(s.vyber||{}).map(i=>najdiKomp(i)?.nazev||"").join(" "):(pc.slozeni||"");
+    const skr=pc.skrin?(najdiKomp(pc.skrin)||{}).nazev||"":"";
+    const pr=(pc.priplatky||[]).map(id=>(D.priplatky.find(x=>x.id===id)||{}).nazev||"").join(" ");
+    return ((s?s.nazev+" "+s.kod:pc.nazev||"")+" "+komp+" "+skr+" "+pr+" "+(pc.pozn||"")).toLowerCase().includes(q);
+  };
+  const videt=razene.filter(sedi);
+  let nakupC=0, prodejC=0, nakupV=0, prodejV=0;
+  const karty=videt.map(pc=>{
     const vlastni=pc.typ==="vlastni";
     const s=vlastni?null:D.sestavy.find(x=>x.id===pc.sest);
     const otevr=!!prOtevrene[pc.id];
     const nak=vlastni?(Number(pc.nakup)||0):(s?pripravenyNakup(pc):0);
     const pro=pripravenyProdej(pc);
-    nakupC+=nak; prodejC+=pro;
+    nakupV+=nak; prodejV+=pro;
     const marze=nak?Math.round(bezDph(pro)-bezDph(nak)):null;
     const V=s?varianty(s):[];
     const P=s?priplatkySestavy(s):[];
@@ -4059,10 +4090,26 @@ function renderPripravene(){
       </div>`:"")}`:""}
     </div>`;
   }).join("");
-  seznam.innerHTML=datalist+karty;
+  seznam.innerHTML=datalist+(karty||`<div class="card" style="padding:26px;text-align:center;color:var(--ink-3)">
+    Hledání nic nenašlo.</div>`);
+  for(const pc of L){
+    const s=sestPc(pc);
+    nakupC+=pc.typ==="vlastni"?(Number(pc.nakup)||0):(s?pripravenyNakup(pc):0);
+    prodejC+=pripravenyProdej(pc);
+  }
   const marzeC=Math.round(bezDph(prodejC)-bezDph(nakupC));
-  if($("#prSum"))$("#prSum").innerHTML=
-    `${L.length} ${L.length===1?"počítač":L.length<5?"počítače":"počítačů"} · nákup ${kc(nakupC)} · prodej ${kc(prodejC)} · marže ${kc(marzeC)}`;
+  if($("#prSum"))$("#prSum").innerHTML=q?`${videt.length} z ${L.length}`:"";
+  if($("#prStat"))$("#prStat").innerHTML=`<div class="row" style="gap:26px;flex-wrap:wrap;align-items:flex-end">
+    <div><div class="muted" style="font-size:11.5px">Postavených počítačů</div>
+      <div class="price" style="font-size:22px">${L.length}</div></div>
+    <div><div class="muted" style="font-size:11.5px">Prodejní cena celkem</div>
+      <div class="price" style="font-size:22px">${kc(prodejC)}</div></div>
+    <div><div class="muted" style="font-size:11.5px">Nákup celkem</div>
+      <div style="font-weight:700">${kc(nakupC)}</div></div>
+    <div><div class="muted" style="font-size:11.5px">Marže v nich</div>
+      <div style="font-weight:700;color:${marzeC<0?"var(--bad)":"var(--ok)"}">${kc(marzeC)}</div></div>
+    ${q?`<div class="muted" style="font-size:12px">zobrazeno ${videt.length} z ${L.length}</div>`:""}
+  </div>`;
 }
 
 function renderSklad(){
@@ -4193,6 +4240,7 @@ $$(".tab").forEach(t=>t.onclick=()=>{
 document.addEventListener("input",e=>{
   const t=e.target;
   if(t.closest&&t.closest(".hledat"))osvezKrizky();
+  if(t.id==="prHledat"){prQ=t.value;renderPripravene();return}
   if(t.dataset.nb){const n=nbNajdi(); if(n){
       n[t.dataset.nb]=["marze","prace","windows"].includes(t.dataset.nb)?(t.value===""?null:Number(t.value)):t.value;
       osvezNabRadek(t,{ks:0,cena:0}); persist();return}}
