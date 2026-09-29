@@ -567,6 +567,7 @@ tr.unused td{background:#FEFCFB}
       <p class="hint" style="margin:0 0 10px">Díly zastavěné v těchto strojích se ve Skladu odečtou ze sloupce
         <strong>Dostupné</strong>. Ze skladu zmizí až prodejem, tedy odpisem objednávky.</p>
       <button class="btn btn-sm btn-primary" id="prPridat">Přidat počítač</button>
+      <button class="btn btn-sm" id="prVlastni" title="Stroj ze zbytků, který v ceníku nemáme">Přidat vlastní sestavu</button>
     </div>
   </div>
   <div id="prSeznam"></div>
@@ -1259,7 +1260,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=187;
+const VERZE=188;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2325,7 +2326,9 @@ function podleBarvy(id,barva){
    ukazuje sloupec Dostupné = Ks minus to, co drží připravené počítače.
    Odečtou se až prodejem, tedy odpisem objednávky. */
 function pripravenyRozpis(pc){
-  const out=new Map(); const pr=(i,q)=>{if(!i)return;const k=najdiKomp(i);if(k&&k.neomezene)return;out.set(i,(out.get(i)||0)+q)};
+  const out=new Map();
+  /* Vlastní sestava se skládá ze zbytků mimo ceník — sklad nedrží. */
+  if(pc.typ==="vlastni")return out; const pr=(i,q)=>{if(!i)return;const k=najdiKomp(i);if(k&&k.neomezene)return;out.set(i,(out.get(i)||0)+q)};
   const s=D.sestavy.find(x=>x.id===pc.sest); if(!s)return out;
   const skr=pc.skrin?najdiKomp(pc.skrin):null;
   const zaklad=rozpadSestavy(s,"",1,skr?skr.nazev:null);
@@ -2366,6 +2369,7 @@ function dostupne(k){
   return ks-(REZ.get(k.id)||0);
 }
 let REZ=new Map();
+const prOtevrene={};   // které karty připravených počítačů jsou rozbalené
 function pripravenyNakup(pc){
   let n=0;
   for(const[i,q]of pripravenyRozpis(pc)){const k=najdiKomp(i); if(k)n+=q*cena(k)}
@@ -2375,6 +2379,7 @@ function pripravenyNakup(pc){
 }
 function pripravenyProdej(pc){
   if(pc.cena!=null&&pc.cena!=="")return Number(pc.cena);
+  if(pc.typ==="vlastni")return 0;        // u vlastní sestavy je cena vždy ruční
   const s=D.sestavy.find(x=>x.id===pc.sest); if(!s)return 0;
   let z=spocti(s).prodej;
   const V=varianty(s), skr=pc.skrin?najdiKomp(pc.skrin):null;
@@ -3935,15 +3940,22 @@ function pripomenPripravene(R){
   }
   const trefy=(D.pripravene||[]).filter(pc=>prodane.has(pc.sest));
   if(!trefy.length)return;
-  const vypis=trefy.map(pc=>{
+  const popis=pc=>{
     const s=D.sestavy.find(x=>x.id===pc.sest);
     const skr=pc.skrin?najdiKomp(pc.skrin):null;
-    return "• "+(s?s.nazev:"?")+(skr?" · "+skr.nazev:"")+(pc.pozn?" · "+pc.pozn:"");
-  }).join("\n");
-  setTimeout(()=>alert(
-    "Prodalo se to, co máš postavené dopředu:\n\n"+vypis+
-    "\n\nPokud odešly tyhle stroje, smaž je v záložce Připraveno — jinak dál drží díly.\n"+
-    "Pokud jsi je nechal a složil nové, nech je být."),300);
+    return "• "+(s?s.nazev:"?")+(skr?" · "+skr.nazev:"");
+  };
+  /* Stroj s poznámkou (škrábnutý, se slevou) se prodává zvlášť — nenabízíme ho
+     jako ten, co odešel, jen na něj upozorníme. */
+  const bezPozn=trefy.filter(pc=>!(pc.pozn||"").trim());
+  const sPozn=trefy.filter(pc=>(pc.pozn||"").trim());
+  let t="Prodalo se to, co máš postavené dopředu:\n\n";
+  t+=bezPozn.length?bezPozn.map(popis).join("\n"):"• (žádný bez poznámky)";
+  if(sPozn.length)t+="\n\nTyhle mají poznámku, takže nejspíš neodešly — zkontroluj:\n"
+    +sPozn.map(pc=>popis(pc)+" · "+pc.pozn).join("\n");
+  t+="\n\nPokud odešly, smaž je v záložce Připraveno — jinak dál drží díly.\n"
+    +"Pokud jsi je nechal a složil nové, nech je být.";
+  setTimeout(()=>alert(t),300);
 }
 function renderPripravene(){
   const seznam=$("#prSeznam"); if(!seznam)return;
@@ -3954,62 +3966,95 @@ function renderPripravene(){
     if($("#prSum"))$("#prSum").textContent="";
     return;
   }
+  /* Našeptávač sestav — píše se do něj třeba "9060 XT" a nabídne všechny, co ji mají. */
+  const nabidka=D.sestavy.filter(x=>(x.kod||"").trim()).map(x=>{
+    const kod=(x.kod||"").split(",")[0].trim();
+    return {id:x.id,popis:kod+" · "+x.nazev};
+  });
+  const datalist=`<datalist id="prSestList">${nabidka.map(o=>`<option value="${esc(o.popis)}">`).join("")}</datalist>`;
+
   let nakupC=0, prodejC=0;
-  const karty=L.map((pc,i)=>{
-    const s=D.sestavy.find(x=>x.id===pc.sest);
-    const nak=s?pripravenyNakup(pc):0, pro=s?pripravenyProdej(pc):0;
+  const karty=L.map(pc=>{
+    const vlastni=pc.typ==="vlastni";
+    const s=vlastni?null:D.sestavy.find(x=>x.id===pc.sest);
+    const otevr=!!prOtevrene[pc.id];
+    const nak=vlastni?(Number(pc.nakup)||0):(s?pripravenyNakup(pc):0);
+    const pro=pripravenyProdej(pc);
     nakupC+=nak; prodejC+=pro;
-    const marze=Math.round(bezDph(pro)-bezDph(nak));
+    const marze=nak?Math.round(bezDph(pro)-bezDph(nak)):null;
     const V=s?varianty(s):[];
     const P=s?priplatkySestavy(s):[];
-    const pevna=pc.cena!=null&&pc.cena!=="";
+    const skr=pc.skrin?najdiKomp(pc.skrin):null;
+    const pocPr=(pc.priplatky||[]).length;
     const chybi=[];
-    for(const[id,q]of (s?pripravenyRozpis(pc):new Map())){
-      const k=najdiKomp(id); if(!k)continue;
-      if((Number(k.ks)||0)<q)chybi.push(k.nazev);
+    if(!vlastni&&s)for(const[id,q]of pripravenyRozpis(pc)){
+      const k=najdiKomp(id); if(k&&(Number(k.ks)||0)<q)chybi.push(k.nazev);
     }
-    return `<div class="card block" style="margin-bottom:10px">
-      <header><span class="rail" style="--k:#1B8A57"></span>
-        <h3 style="font-size:13.5px">${s?esc(s.nazev):"— vyber sestavu —"}</h3>
-        ${pc.pozn?`<span class="band" style="background:#FDEBE9;color:#A03027;font-weight:650">${esc(pc.pozn)}</span>`:""}
+    const nazev=vlastni?(pc.nazev||"Vlastní sestava"):(s?s.nazev:"— vyber sestavu —");
+    const _bg=s?barvaSestavy(s):"#F4F6F8";
+    const strucne=vlastni?esc((pc.slozeni||"").split("\n")[0]||"")
+      :(s?["RAM","SSD","Zdroj"].map(x=>{const i=s.vyber&&s.vyber[x];const k=i?najdiKomp(i):null;return k?esc(k.nazev):null})
+        .filter(Boolean).join("<em>·</em>"):"");
+    return `<div class="card build${otevr?"":" sbaleno"}" data-prcard="${pc.id}" style="--sestbg:${_bg};margin-bottom:8px">
+      <header data-prbal="${pc.id}">
+        <button class="sipka" data-prbal="${pc.id}" title="${otevr?"Sbalit":"Rozbalit"}">${otevr?"▾":"▸"}</button>
+        <div class="hlavicka">
+          ${vlastni?`<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700">vlastní</span>`
+            :`<span class="band" style="background:rgba(255,255,255,.7);font-weight:700">${esc(((s&&s.kod)||"").split(",")[0].trim().split("/")[0]||"—")}</span>`}
+          <span class="hcpu">${esc(nazev)}</span>
+          ${skr?`<span class="hgpu">${esc(skr.nazev)}</span>`:""}
+          <span class="hdetail">${strucne}</span>
+        </div>
+        ${pocPr?`<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700"
+          title="Počítač má příplatky">s příplatky · ${pocPr}</span>`:""}
+        ${pc.pozn?`<span class="band" style="background:#FDEBE9;color:#A03027;font-weight:700">${esc(pc.pozn)}</span>`:""}
         ${chybi.length?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700"
           title="Ve skladu není tolik kusů: ${esc(chybi.join(", "))}">chybí díly</span>`:""}
-        <span style="flex:1"></span>
-        <span class="muted" style="font-size:12px">nákup ${kc(nak)}</span>
-        <span style="font-weight:700;margin:0 10px">${kc(pro)}</span>
-        <span class="muted" style="font-size:12px">marže ${kc(marze)}</span>
-        <button class="icon-x" data-prdel="${pc.id}" title="Smazat">×</button></header>
-      <div style="padding:10px 14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <select data-pri="${pc.id}" data-prf="sest" style="min-width:230px;font-size:12.5px">
-          <option value="">— sestava —</option>
-          ${D.sestavy.filter(x=>(x.kod||"").trim()).map(x=>
-            `<option value="${x.id}"${x.id===pc.sest?" selected":""}>${esc((x.kod||"").split(",")[0].trim())} · ${esc(x.nazev)}</option>`).join("")}
-        </select>
-        <select data-pri="${pc.id}" data-prf="skrin" style="min-width:170px;font-size:12.5px">
-          <option value="">— skříň ze sestavy —</option>
-          ${V.map(v=>`<option value="${v.k.id}"${v.k.id===pc.skrin?" selected":""}>${esc(v.k.nazev)}</option>`).join("")}
-        </select>
+        <span class="muted" style="font-size:11.5px;margin-left:8px">nákup ${nak?kc(nak):"—"}</span>
+        <span class="hcena">${kc(pro)}</span>
+        <span class="muted" style="font-size:11.5px;margin-left:8px">${marze!=null?"marže "+kc(marze):""}</span>
+        <button class="icon-x" data-prdel="${pc.id}" title="Smazat">×</button>
+      </header>
+      ${otevr?`<div style="padding:10px 14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        ${vlastni?`
+          <input type="text" value="${esc(pc.nazev||"")}" data-pri="${pc.id}" data-prf="nazev"
+            placeholder="název, např. R5 5600 + RX 6600 ze zbytků" style="min-width:280px;font-size:12.5px">
+          <input type="number" value="${pc.nakup??""}" data-pri="${pc.id}" data-prf="nakup"
+            placeholder="nákup s DPH" style="max-width:130px;font-size:12.5px" title="Kolik tě díly stály — jen pro přehled">
+        `:`
+          <input type="text" list="prSestList" value="${esc(s?((s.kod||"").split(",")[0].trim()+" · "+s.nazev):"")}"
+            data-pri="${pc.id}" data-prf="sestText" placeholder="hledej sestavu, např. 9060 XT"
+            style="min-width:300px;font-size:12.5px">
+          <select data-pri="${pc.id}" data-prf="skrin" style="min-width:170px;font-size:12.5px">
+            <option value="">— skříň ze sestavy —</option>
+            ${V.map(v=>`<option value="${v.k.id}"${v.k.id===pc.skrin?" selected":""}>${esc(v.k.nazev)}</option>`).join("")}
+          </select>
+        `}
         <input type="text" value="${esc(pc.pozn||"")}" data-pri="${pc.id}" data-prf="pozn"
-          placeholder="poznámka, např. škrábnutá skříň" style="min-width:220px;font-size:12.5px">
+          placeholder="poznámka, např. škrábnuto" style="min-width:200px;font-size:12.5px">
         <input type="number" value="${pc.cena??""}" data-pri="${pc.id}" data-prf="cena"
-          placeholder="pevná cena" style="max-width:120px;font-size:12.5px;${pevna?"font-weight:700;background:#FFF8E1":""}"
+          placeholder="pevná cena" style="max-width:120px;font-size:12.5px;${pc.cena!=null&&pc.cena!==""?"font-weight:700;background:#FFF8E1":""}"
           title="Když vyplníš, použije se místo vypočtené ceny">
         <input type="date" value="${esc(pc.datum||"")}" data-pri="${pc.id}" data-prf="datum"
           style="max-width:140px;font-size:12.5px" title="Kdy byl postavený">
       </div>
-      ${P.length?`<div style="padding:0 14px 12px;display:flex;gap:14px;flex-wrap:wrap">
+      ${vlastni?`<div style="padding:0 14px 12px">
+        <textarea data-pri="${pc.id}" data-prf="slozeni" rows="3" style="width:100%;font-size:12.5px"
+          placeholder="komponenty, každou na řádek — ze skladu se neodečítají">${esc(pc.slozeni||"")}</textarea>
+      </div>`:(P.length?`<div style="padding:0 14px 12px;display:flex;gap:14px;flex-wrap:wrap">
         ${P.map(p=>`<label class="row" style="gap:5px;font-size:12px;cursor:pointer">
           <input type="checkbox" data-prp="${pc.id}" data-prpid="${p.id}" style="width:auto"
             ${(pc.priplatky||[]).includes(p.id)?"checked":""}>
           ${esc(p.nazev)} <span class="muted">${surPlati(p)!=null?kc(surPlati(p)):""}</span></label>`).join("")}
-      </div>`:""}
+      </div>`:"")}`:""}
     </div>`;
   }).join("");
-  seznam.innerHTML=karty;
+  seznam.innerHTML=datalist+karty;
   const marzeC=Math.round(bezDph(prodejC)-bezDph(nakupC));
   if($("#prSum"))$("#prSum").innerHTML=
     `${L.length} ${L.length===1?"počítač":L.length<5?"počítače":"počítačů"} · nákup ${kc(nakupC)} · prodej ${kc(prodejC)} · marže ${kc(marzeC)}`;
 }
+
 function renderSklad(){
   REZ=rezervace();                       // kolik kusů drží připravené počítače
   const vse=$("#skVse")&&$("#skVse").checked;
@@ -4291,7 +4336,14 @@ document.addEventListener("change",e=>{
     const pc=D.pripravene.find(x=>x.id===t.dataset.pri);
     if(pc){
       const f=t.dataset.prf;
-      pc[f]=f==="cena"?(t.value===""?null:Number(t.value)):t.value;
+      if(f==="sestText"){
+        /* Z našeptávače přijde "kód · název", najdeme podle kódu na začátku. */
+        const kod=String(t.value||"").split("·")[0].trim();
+        const s=D.sestavy.find(x=>(x.kod||"").split(",").map(y=>y.trim()).includes(kod))
+          ||D.sestavy.find(x=>((x.kod||"").split(",")[0].trim()+" · "+x.nazev)===String(t.value||"").trim());
+        if(s&&s.id!==pc.sest){pc.sest=s.id;pc.skrin="";pc.priplatky=[]}
+        renderPripravene(); renderSklad(); persist(); return}
+      pc[f]=["cena","nakup"].includes(f)?(t.value===""?null:Number(t.value)):t.value;
       if(f==="sest"){pc.skrin="";pc.priplatky=[]}   // jiná sestava → jiné skříně i příplatky
       renderPripravene(); renderSklad(); persist();
     }
@@ -4388,10 +4440,15 @@ document.addEventListener("click",e=>{
   if(t.dataset.delcat){if(confirm(`Smazat kategorii ${t.dataset.delcat} i s komponentami?`)){delete D.komponenty[t.dataset.delcat];renderAll()}}
   if(t.id==="sortAll"){serad(D);renderAll();toast("Seřazeno")}
   if(t.id==="addCat"){const n=$("#newCat").value.trim();if(n&&!D.komponenty[n]){D.komponenty[n]=[];$("#newCat").value="";renderAll()}}
-  if(t.id==="prPridat"){
-    D.pripravene.push({id:uid(),sest:"",skrin:"",priplatky:[],pozn:"",cena:null,
-      datum:new Date().toISOString().slice(0,10)});
+  if(t.id==="prPridat"||t.id==="prVlastni"){
+    const nc={id:uid(),sest:"",skrin:"",priplatky:[],pozn:"",cena:null,
+      datum:new Date().toISOString().slice(0,10)};
+    if(t.id==="prVlastni"){nc.typ="vlastni";nc.nazev="";nc.slozeni="";nc.nakup=null}
+    D.pripravene.push(nc); prOtevrene[nc.id]=true;
     renderPripravene(); persist(); return}
+  if(t.dataset.prbal){
+    prOtevrene[t.dataset.prbal]=!prOtevrene[t.dataset.prbal];
+    renderPripravene(); return}
   if(t.dataset.prdel){
     D.pripravene=D.pripravene.filter(x=>x.id!==t.dataset.prdel);
     renderPripravene(); renderSklad(); persist(); return}
