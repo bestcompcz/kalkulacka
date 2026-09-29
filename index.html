@@ -1259,7 +1259,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=186;
+const VERZE=187;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2634,6 +2634,7 @@ function provedOdpis(){
   $("#modal").hidden=true; $("#pdCsv").value=""; odpisCache=null;
   renderAll(); toast("Sklad odepsán, vyřešeno do "+czDatum(maxDat));
   uklidProdejeVCloudu();
+  pripomenPripravene(R);
 }
 /* Dodávka označená jako externí jde do skladu mimo Plzeň. Vedeme ji zvlášť,
    protože z ní nejde stavět — nejdřív se musí přivézt. */
@@ -3923,6 +3924,27 @@ function renderRekl(){
 }
 /* Výpis připravených počítačů. Cena se počítá ze sestavy a příplatků, pokud
    u konkrétního kusu není zadaná napevno — třeba u škrábnutého se slevou. */
+/* Po odpisu připomeneme, že se prodala sestava, kterou máme postavenou dopředu.
+   Nic nemažeme — může jít i o stroj složený nanovo, to kalkulačka nepozná. */
+function pripomenPripravene(R){
+  if(!(D.pripravene||[]).length)return;
+  const prodane=new Set();
+  for(const o of R.obj){
+    if(!["ok","s výhradou"].includes(o.stav))continue;
+    const s=najdiSestavu(o.kod); if(s)prodane.add(s.id);
+  }
+  const trefy=(D.pripravene||[]).filter(pc=>prodane.has(pc.sest));
+  if(!trefy.length)return;
+  const vypis=trefy.map(pc=>{
+    const s=D.sestavy.find(x=>x.id===pc.sest);
+    const skr=pc.skrin?najdiKomp(pc.skrin):null;
+    return "• "+(s?s.nazev:"?")+(skr?" · "+skr.nazev:"")+(pc.pozn?" · "+pc.pozn:"");
+  }).join("\n");
+  setTimeout(()=>alert(
+    "Prodalo se to, co máš postavené dopředu:\n\n"+vypis+
+    "\n\nPokud odešly tyhle stroje, smaž je v záložce Připraveno — jinak dál drží díly.\n"+
+    "Pokud jsi je nechal a složil nové, nech je být."),300);
+}
 function renderPripravene(){
   const seznam=$("#prSeznam"); if(!seznam)return;
   const L=D.pripravene||[];
