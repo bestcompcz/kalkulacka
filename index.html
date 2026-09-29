@@ -1260,7 +1260,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=190;
+const VERZE=191;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3986,6 +3986,13 @@ function renderPripravene(){
     const P=s?priplatkySestavy(s):[];
     const skr=pc.skrin?najdiKomp(pc.skrin):null;
     const pocPr=(pc.priplatky||[]).length;
+    /* Do štítku se vejde jen zkratka — plný název je v bublině. */
+    const nazvyPr=(pc.priplatky||[]).map(id=>{
+      const p=D.priplatky.find(x=>x.id===id); return p?p.nazev:"?";
+    });
+    const zkratka=n=>n.replace(/^z .*? na /,"").replace(/^za /,"")
+      .replace(/\s*\(.*?\)\s*/g," ").replace(/\s+/g," ").trim();
+    const strucnePr=nazvyPr.map(zkratka).join(", ");
     const chybi=[];
     if(!vlastni&&s)for(const[id,q]of pripravenyRozpis(pc)){
       const k=najdiKomp(id); if(k&&(Number(k.ks)||0)<q)chybi.push(k.nazev);
@@ -4009,7 +4016,7 @@ function renderPripravene(){
           style="background:#EAF0FB;color:#2C4C86;font-weight:700;text-decoration:none"
           title="Otevřít sestavu na e-shopu" data-stop="1">↗</a>`:""}
         ${pocPr?`<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700"
-          title="Počítač má příplatky">s příplatky · ${pocPr}</span>`:""}
+          title="${esc(nazvyPr.join(" · "))}">+ ${esc(strucnePr.length>52?strucnePr.slice(0,50)+"…":strucnePr)}</span>`:""}
         ${pc.pozn?`<span class="band" style="background:#FDEBE9;color:#A03027;font-weight:700">${esc(pc.pozn)}</span>`:""}
         ${chybi.length?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700"
           title="Ve skladu není tolik kusů: ${esc(chybi.join(", "))}">chybí díly</span>`:""}
