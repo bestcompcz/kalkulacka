@@ -1260,7 +1260,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=188;
+const VERZE=189;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3967,10 +3967,10 @@ function renderPripravene(){
     return;
   }
   /* Našeptávač sestav — píše se do něj třeba "9060 XT" a nabídne všechny, co ji mají. */
-  const nabidka=D.sestavy.filter(x=>(x.kod||"").trim()).map(x=>{
-    const kod=(x.kod||"").split(",")[0].trim();
-    return {id:x.id,popis:kod+" · "+x.nazev};
-  });
+  /* V nabídce je každá sestava jednou, pod základním kódem bez přípony skříně —
+     jinak to vypadá, že existují jen varianty NOR nebo FRA. Skříň se volí vedle. */
+  const popisSestavy=x=>((x.kod||"").split(",")[0].trim().split("/")[0])+" · "+x.nazev;
+  const nabidka=D.sestavy.filter(x=>(x.kod||"").trim()).map(x=>({id:x.id,popis:popisSestavy(x)}));
   const datalist=`<datalist id="prSestList">${nabidka.map(o=>`<option value="${esc(o.popis)}">`).join("")}</datalist>`;
 
   let nakupC=0, prodejC=0;
@@ -4022,7 +4022,7 @@ function renderPripravene(){
           <input type="number" value="${pc.nakup??""}" data-pri="${pc.id}" data-prf="nakup"
             placeholder="nákup s DPH" style="max-width:130px;font-size:12.5px" title="Kolik tě díly stály — jen pro přehled">
         `:`
-          <input type="text" list="prSestList" value="${esc(s?((s.kod||"").split(",")[0].trim()+" · "+s.nazev):"")}"
+          <input type="text" list="prSestList" value="${esc(s?popisSestavy(s):"")}"
             data-pri="${pc.id}" data-prf="sestText" placeholder="hledej sestavu, např. 9060 XT"
             style="min-width:300px;font-size:12.5px">
           <select data-pri="${pc.id}" data-prf="skrin" style="min-width:170px;font-size:12.5px">
@@ -4337,10 +4337,14 @@ document.addEventListener("change",e=>{
     if(pc){
       const f=t.dataset.prf;
       if(f==="sestText"){
-        /* Z našeptávače přijde "kód · název", najdeme podle kódu na začátku. */
-        const kod=String(t.value||"").split("·")[0].trim();
+        /* Z našeptávače přijde "kód · název". Hledáme podle základního kódu i podle
+           celého kódu varianty, kdyby ho Lukáš napsal ručně. */
+        const psano=String(t.value||"").trim();
+        const kod=psano.split("·")[0].trim();
+        const zaklad=kod.split("/")[0];
         const s=D.sestavy.find(x=>(x.kod||"").split(",").map(y=>y.trim()).includes(kod))
-          ||D.sestavy.find(x=>((x.kod||"").split(",")[0].trim()+" · "+x.nazev)===String(t.value||"").trim());
+          ||D.sestavy.find(x=>(x.kod||"").split(",").some(y=>y.trim().split("/")[0]===zaklad))
+          ||D.sestavy.find(x=>psano.endsWith(x.nazev));
         if(s&&s.id!==pc.sest){pc.sest=s.id;pc.skrin="";pc.priplatky=[]}
         renderPripravene(); renderSklad(); persist(); return}
       pc[f]=["cena","nakup"].includes(f)?(t.value===""?null:Number(t.value)):t.value;
