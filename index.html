@@ -1266,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=195;
+const VERZE=196;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3467,6 +3467,13 @@ let skKat="",skQ="",kompQ="",sestQ="",specText="",lvlCache=null,zmenyCache=[],od
 const sestOtevrene={};   // které karty jsou rozbalené
 const jeKriticka=k=>k.krit!=null&&k.krit!==""&&(Number(k.ks)||0)<=Number(k.krit);
 const podLimitem=k=>jeKriticka(k)||(k.min!=null&&k.min!==""&&(Number(k.ks)||0)<=Number(k.min));
+/* Po změně Ks přepíšeme vedlejší pole s volnými kusy, ať sedí hned. */
+function osvezDostupne(t,k){
+  const tr=t.closest("tr"); if(!tr)return;
+  const inp=tr.querySelector("[data-dost]"); if(!inp)return;
+  inp.value=(k.ks==null||k.ks==="")?"":dostupne(k);
+  inp.style.color=dostupne(k)<0?"#C0392B":"";
+}
 function osvezRadekSkladu(t,k){
   const tr=t.closest("tr"); if(!tr)return;
   const c=cena(k), ks=Number(k.ks)||0;
@@ -4185,9 +4192,11 @@ function renderSklad(){
           ${(Number(k.ksExt)||0)>0?`<span class="band" style="background:#2C4C86;color:#fff;font-weight:700" title="V externím skladu">ext ${k.ksExt}</span>
             <button class="btn btn-sm" data-prevez="${k.id}" style="padding:1px 7px;font-size:11px">Přivézt</button>`:""}</td>
         <td class="r">${k.neomezene?'<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700">∞</span>':`<input type="number" class="px" value="${k.ks??""}" data-kf="ks" data-kid="${k.id}" placeholder="—">`}</td>
-        <td class="r num" style="background:#EAF6F0;font-weight:700;${dostupne(k)<0?"color:#C0392B":""}"
-          title="${(REZ.get(k.id)||0)?`Ks minus ${REZ.get(k.id)} v připravených počítačích`:"Nic není zastavěné v připravených počítačích"}">${
-          k.neomezene||k.ks==null||k.ks===""?"—":dostupne(k)}</td>
+        <td class="r" style="background:#EAF6F0">${k.neomezene?'<span class="muted">—</span>'
+          :`<input type="number" class="px" value="${k.ks==null||k.ks===""?"":dostupne(k)}" data-dost="${k.id}"
+             placeholder="—" style="font-weight:700;text-align:right;${dostupne(k)<0?"color:#C0392B":""}"
+             title="${(REZ.get(k.id)||0)?`Volné kusy. Ks (${k.ks}) minus ${REZ.get(k.id)} v připravených počítačích — když sem napíšeš skutečný počet volných kusů, Ks se dopočítá samo.`
+               :"Volné kusy. Nic není zastavěné v připravených počítačích."}">`}</td>
         <td class="r"><input type="number" class="px" value="${k.min??""}" data-kf="min" data-kid="${k.id}" placeholder="—" ${k.neomezene?"disabled":""}></td>
         <td class="r"><input type="number" class="px" value="${k.krit??""}" data-kf="krit" data-kid="${k.id}" placeholder="—" ${k.neomezene?"disabled":""}></td>
         <td class="r"><input type="checkbox" ${k.neomezene?"checked":""} data-kinf="${k.id}" style="width:auto;cursor:pointer" title="Neomezené množství — neodečítá se ze skladu a nenavyšuje jeho hodnotu"></td>
@@ -4355,7 +4364,19 @@ document.addEventListener("input",e=>{
     if(n){n[t.dataset.nf]=["ks","cena","dodano","fakt"].includes(t.dataset.nf)?(t.value===""?null:Number(t.value)):(t.value||null);
       if(["ks","dodano","fakt"].includes(t.dataset.nf))osvezStavNakupu(t,n); persist()}}
   if(t.dataset.kid&&t.dataset.kf){const k=najdiKomp(t.dataset.kid);
-    if(k){k[t.dataset.kf]=t.value===""?null:Number(t.value);osvezRadekSkladu(t,k);persist()}}
+    if(k){k[t.dataset.kf]=t.value===""?null:Number(t.value);osvezRadekSkladu(t,k);
+      if(t.dataset.kf==="ks")osvezDostupne(t,k);
+      persist()}}
+  /* Do Dostupného se píše, kolik kusů leží volně. Ks dopočítáme přičtením toho,
+     co drží připravené počítače — jinak by se o zastavěné díly přišlo. */
+  if(t.dataset.dost){const k=najdiKomp(t.dataset.dost);
+    if(k){
+      const rez=REZ.get(k.id)||0;
+      k.ks=t.value===""?null:Number(t.value)+rez;
+      const tr=t.closest("tr"); const inpKs=tr&&tr.querySelector('[data-kf="ks"]');
+      if(inpKs)inpKs.value=k.ks==null?"":k.ks;
+      osvezRadekSkladu(t,k); persist();
+    }}
   if(t.tagName!=="SELECT"&&t.dataset.id&&t.dataset.f){const k=najdiKomp(t.dataset.id);if(k){k[t.dataset.f]=t.type==="number"?Number(t.value):t.value;persist();
     if(!["nazev","dod","modely","kodEshop"].includes(t.dataset.f)){renderSest();renderSur()}}}
   if(t.dataset.sk){const s=D.sestavy.find(x=>x.id===t.dataset.sk);if(s){s.kod=t.value;persist()}}
