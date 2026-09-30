@@ -1266,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=196;
+const VERZE=197;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3468,6 +3468,23 @@ const sestOtevrene={};   // které karty jsou rozbalené
 const jeKriticka=k=>k.krit!=null&&k.krit!==""&&(Number(k.ks)||0)<=Number(k.krit);
 const podLimitem=k=>jeKriticka(k)||(k.min!=null&&k.min!==""&&(Number(k.ks)||0)<=Number(k.min));
 /* Po změně Ks přepíšeme vedlejší pole s volnými kusy, ať sedí hned. */
+/* Přepočítá rozdíl a marži v řádku upozornění, bez překreslení okna. */
+function osvezDrzenyRadek(t,s){
+  const tr=t.closest("tr"); if(!tr)return;
+  const td=tr.querySelectorAll("td"); if(td.length<5)return;
+  const vypocet=Number(String(td[2].textContent).replace(/[^\d-]/g,""))||0;
+  const drz=s.drzena==null?null:Number(s.drzena);
+  const c=spocti(s);
+  if(drz==null){
+    td[3].textContent="—"; td[4].textContent="—"; return;
+  }
+  const rozdil=vypocet-drz;
+  td[3].textContent=(rozdil>0?"+":"")+Math.round(rozdil);
+  td[3].style.color=rozdil>0?"var(--bad)":"var(--ok)";
+  const m=Math.round(bezDph(drz)-bezDph(c.nakup));
+  td[4].innerHTML=kc(m)+` <span class="muted" style="font-size:10.5px">z ${kc(Math.round(bezDph(vypocet)-bezDph(c.nakup)))}</span>`;
+  td[4].style.color=m<0?"var(--bad)":"var(--ink-2)";
+}
 function osvezDostupne(t,k){
   const tr=t.closest("tr"); if(!tr)return;
   const inp=tr.querySelector("[data-dost]"); if(!inp)return;
@@ -4286,12 +4303,10 @@ document.addEventListener("input",e=>{
   if(t.closest&&t.closest(".hledat"))osvezKrizky();
   if(t.id==="prHledat"){prQ=t.value;renderPripravene();return}
   if(t.dataset.drzc){
+    /* Při psaní jen uložíme a dopočítáme dotčený řádek. Překreslit celé okno
+       by uteklo kurzoru a okno by skočilo nahoru už po první číslici. */
     const s=D.sestavy.find(x=>x.id===t.dataset.drzc);
-    if(s){
-      s.drzena=t.value===""?null:Number(t.value);
-      renderSest(); persist();
-      if(!$("#modal").hidden)zobrazVse();          // překreslíme okno, ať sedí rozdíl i marže
-    }
+    if(s){s.drzena=t.value===""?null:Number(t.value); osvezDrzenyRadek(t,s); persist()}
     return}
   if(t.dataset.nb){const n=nbNajdi(); if(n){
       n[t.dataset.nb]=["marze","prace","windows"].includes(t.dataset.nb)?(t.value===""?null:Number(t.value)):t.value;
