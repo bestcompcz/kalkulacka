@@ -1266,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=198;
+const VERZE=199;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3539,13 +3539,15 @@ function osvezRadekSkladu(t,k){
   const tr=t.closest("tr"); if(!tr)return;
   const c=cena(k), ks=Number(k.ks)||0;
   const jeKrit=jeKriticka(k), nizko=podLimitem(k);
-  const td=tr.querySelectorAll("td");
-  if(td.length>=10){
-    const pouz=td[7]; if(pouz)pouz.textContent=kc(c);
-    td[8].textContent=(k.ks!=null&&k.ks!=="")?kc(ks*c):"—";
-    td[9].innerHTML=jeKrit?'<span class="band" style="background:#C0392B;color:#fff;font-weight:700">kritické</span>'
+  /* Buňky hledáme podle značky, ne podle pořadí — po přidání sloupce Dostupné
+     se indexy posunuly a obnova přepisovala buňku s polem pro reprodukční cenu. */
+  const bPouz=tr.querySelector("[data-cell=pouzita]");
+  const bHod=tr.querySelector("[data-cell=hodnota]");
+  const bStav=tr.querySelector("[data-cell=stav]");
+  if(bPouz)bPouz.textContent=kc(c);
+  if(bHod)bHod.textContent=(k.ks!=null&&k.ks!=="")?kc(ks*c):"—";
+  if(bStav)bStav.innerHTML=jeKrit?'<span class="band" style="background:#C0392B;color:#fff;font-weight:700">kritické</span>'
       :(nizko?'<span class="band" style="background:#FDEBE9;color:#A03027">dochází</span>':"");
-  }
   tr.style.background=jeKrit?"#FDE7E4":(nizko?"#FEF6F4":"");
   const blok=tr.closest(".card.block");
   if(blok){
@@ -4264,9 +4266,9 @@ function renderSklad(){
         <td class="r num muted">${kc(k.sklad)}</td>
         <td class="r"><input type="number" class="px" value="${k.novy??""}" data-kf="novy" data-kid="${k.id}"
           title="Reprodukční cena — dnešní tržní cena. Přepočet ze nákupů na ni nesahá."></td>
-        <td class="r num" style="font-weight:650">${kc(cena(k))}</td>
-        <td class="r num">${(k.ks!=null&&k.ks!=="")?kc(v):"—"}</td>
-        <td class="r">${jeKrit?'<span class="band" style="background:#C0392B;color:#fff;font-weight:700">kritické</span>':(nizko?'<span class="band" style="background:#FDEBE9;color:#A03027">dochází</span>':"")}</td>
+        <td class="r num" data-cell="pouzita" style="font-weight:650">${kc(cena(k))}</td>
+        <td class="r num" data-cell="hodnota">${(k.ks!=null&&k.ks!=="")?kc(v):"—"}</td>
+        <td class="r" data-cell="stav">${jeKrit?'<span class="band" style="background:#C0392B;color:#fff;font-weight:700">kritické</span>':(nizko?'<span class="band" style="background:#FDEBE9;color:#A03027">dochází</span>':"")}</td>
       </tr>`}).join("");
     html+=`<div class="card block" style="margin-bottom:12px">
       <header><span class="rail" style="--k:${railFor(cat)}"></span><h3>${esc(cat)}</h3>
