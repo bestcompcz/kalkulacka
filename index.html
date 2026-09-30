@@ -1266,7 +1266,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=197;
+const VERZE=198;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3421,8 +3421,9 @@ function zobrazVse(){
   </details>
   <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
     <button class="btn btn-sm" id="vseZrus">Zrušit</button>
-    ${A.sest.length?'<button class="btn btn-sm" id="vseCsv">Potvrdit a stáhnout CSV</button>':""}
-    <button class="btn btn-sm btn-primary" id="vseOk">Potvrdit${A.sest.length?" bez CSV":""}</button></div>`;
+    ${A.sest.length?'<button class="btn btn-sm" id="vseCsv">Potvrdit a stáhnout jen ceny</button>':""}
+    <button class="btn btn-sm btn-primary" id="vseVse">Potvrdit a stáhnout vše pro Shoptet</button>
+    <button class="btn btn-sm" id="vseOk">Potvrdit bez souborů</button></div>`;
   modalKomp=null; $("#modal").hidden=false;
 }
 /* zapíše naskladnění, ceny komponent a příznak držené ceny */
@@ -3444,10 +3445,29 @@ function provedVse(){
   });
   return {n:A.nask.length,c:A.ceny.length,drzet};
 }
-function vsePotvrd(csvTaky){
+/* Soubor s příplatky pro Shoptet — volá se z tlačítka i z okna přepočtu. */
+function exportPriplatku(){
+    const pary=new Set();
+    for(const s of D.sestavy)for(const p of priplatkySestavy(s))if(!(s.vyp||{})[p.id])pary.add(paramPriplatku(p));
+    const sl=[...pary].sort();
+    const rows=[["code","pairCode",...sl.flatMap(x=>["surchargeParameter:"+x,
+      "surchargeParameter:"+x+":requiredValue","surchargeParameter:"+x+":currency",
+      "surchargeParameter:"+x+":includingVat"])]];
+    let bezKodu=0;
+    for(const s of D.sestavy){
+      const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
+      if(!kody.length){bezKodu++;continue}
+      const bunky=sl.flatMap(par=>[priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]&&paramPriplatku(p)===par)
+        .map(p=>`${(p.eshop||p.nazev)}=${surPlati(p)||0}`).join(";"),SUR_POVINNY,SUR_MENA,SUR_SDPH]);
+      for(const k of kody)rows.push([k,pairProKod(k,s),...bunky]);
+    }
+    dl(`shoptet-priplatky-${dnes()}-${rows.length-1}variant.csv`,csv(rows),"text/csv");
+    toast(rows.length-1+" řádků"+(bezKodu?"  ·  "+bezKodu+" sestav bez kódu vynecháno":""));
+  }
+function vsePotvrd(csvTaky,vseSoubory){
   const A=vseCache, r=provedVse(); if(!r)return;
   let hlaska=`${r.n} komponent naskladněno, ${r.c} cen přepočítáno`;
-  if(A.pripl&&A.pripl.length)hlaska+=`  ·  ${A.pripl.length} příplatků změnilo cenu, nezapomeň je stáhnout`;
+  if(A.pripl&&A.pripl.length&&!vseSoubory)hlaska+=`  ·  ${A.pripl.length} příplatků změnilo cenu, nezapomeň je stáhnout`;
   if(csvTaky){
     const rows=[["code","pairCode","price"]]; let n=0;
     A.sest.forEach((g,i)=>{
@@ -3460,6 +3480,30 @@ function vsePotvrd(csvTaky){
       dl(`shoptet-ceny-${dnes()}-${A.sest.length-r.drzet.size}sestav-${n}variant-${bezDiakritiky(kody)}.csv`,csv(bezNulovychCen(rows)),"text/csv");
       hlaska+=`, CSV s ${n} variantami`}
     else hlaska+=", do CSV nešlo nic";
+  }
+  /* Všechno pro Shoptet naráz — ceny už jsou stažené výš, teď kategorie a příplatky.
+     Soubory se pouštějí přes frontu s odstupem, jinak prohlížeč druhý nestihne. */
+  if(vseSoubory){
+    const rowsK=[]; let KATmax=0;
+    A.sest.forEach((g,i)=>{
+      if(r.drzet.has(i))return;
+      if(!g.lvlZmena)return;
+      for(const rd of g.radky){
+        const kat=(g.nove||[]).length?g.nove:null; if(!kat)continue;
+        rowsK.push([rd.kod,g.s.pairCode||"",...kat]);
+        if(kat.length>KATmax)KATmax=kat.length;
+      }
+    });
+    if(rowsK.length){
+      const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
+      dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
+        csv([["code","pairCode",...cols],...rowsK.map(x=>[x[0],x[1],...cols.map((_,i)=>x[2+i]||"")])]),"text/csv");
+      hlaska+=`, kategorie ${rowsK.length} variant`;
+    }
+    if(A.pripl&&A.pripl.length){
+      exportPriplatku();
+      hlaska+=`, příplatky (${A.pripl.length} se změnilo)`;
+    }
   }
   vseCache=null; $("#modal").hidden=true; renderAll(); toast(hlaska);
 }
@@ -4770,24 +4814,8 @@ document.addEventListener("click",e=>{
     const rows=[["Sestava","Nákup s DPH","Nákup bez DPH","Marže pásmo","Prodej s DPH","Marže skutečná","Marže %"]];
     D.sestavy.forEach(s=>{const c=spocti(s);rows.push([s.nazev,r(c.nakup),r(c.nakupBez),r(c.marze),r(c.prodej),r(c.marzeReal),c.procenta.toFixed(1)])});
     dl(`sestavy-prehled-${dnes()}.csv`,csv(rows),"text/csv");toast("Přehled stažen")}
-  if(t.id==="expShoptet"){
-    const pary=new Set();
-    for(const s of D.sestavy)for(const p of priplatkySestavy(s))if(!(s.vyp||{})[p.id])pary.add(paramPriplatku(p));
-    const sl=[...pary].sort();
-    const rows=[["code","pairCode",...sl.flatMap(x=>["surchargeParameter:"+x,
-      "surchargeParameter:"+x+":requiredValue","surchargeParameter:"+x+":currency",
-      "surchargeParameter:"+x+":includingVat"])]];
-    let bezKodu=0;
-    for(const s of D.sestavy){
-      const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
-      if(!kody.length){bezKodu++;continue}
-      const bunky=sl.flatMap(par=>[priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]&&paramPriplatku(p)===par)
-        .map(p=>`${(p.eshop||p.nazev)}=${surPlati(p)||0}`).join(";"),SUR_POVINNY,SUR_MENA,SUR_SDPH]);
-      for(const k of kody)rows.push([k,pairProKod(k,s),...bunky]);
-    }
-    dl(`shoptet-priplatky-${dnes()}-${rows.length-1}variant.csv`,csv(rows),"text/csv");
-    toast(rows.length-1+" řádků"+(bezKodu?"  ·  "+bezKodu+" sestav bez kódu vynecháno":""));
-  }
+  if(t.id==="expShoptet")exportPriplatku();
+
   if(t.id==="nbNova"){const n={id:uid(),nazev:"",datum:new Date().toISOString().slice(0,10),
       text:"",radky:[],prace:D.nastaveni.prace,windows:0,marze:6000,pozn:""};
     D.nabidky.push(n); nbAkt=n.id; renderNab(); persist()}
@@ -4958,6 +4986,7 @@ document.addEventListener("click",e=>{
   if(t.id==="vseZrus"){vseCache=null;$("#modal").hidden=true}
   if(t.id==="vseOk"){vsePotvrd(false)}
   if(t.id==="vseCsv"){vsePotvrd(true)}
+  if(t.id==="vseVse"){vsePotvrd(true,true)}
   if(t.id==="nkSklad"){zobrazZaskladneni()}
   if(t.id==="zaskZrus"){$("#modal").hidden=true}
   if(t.id==="zaskOk"){provedZaskladneni()}
