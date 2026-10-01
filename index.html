@@ -1056,7 +1056,7 @@ function renderKomp(){
       <h3>${esc(cat)}</h3><span class="count">${jenNep?vis.length+"/"+arr.length:arr.length}</span>
       <button class="icon-x" data-delcat="${esc(cat)}" title="Smazat kategorii">×</button></header>
       <div class="tbl"><table><thead><tr>
-        <th>Komponenta</th><th style="width:120px">Dodavatel</th><th style="width:92px">Kód e-shopu</th>
+        <th>Komponenta</th><th>Přesný model</th><th style="width:120px">Dodavatel</th><th style="width:92px">Kód e-shopu</th>
         <th class="r" style="width:64px" title="Kusů skladem">Ks</th>
         <th class="r" style="width:92px">Skladová</th><th class="r" style="width:92px">Reprod.</th>
         <th class="r" style="width:86px">Použitá</th><th style="width:118px">Režim</th>
@@ -1070,6 +1070,13 @@ function renderKomp(){
                 style="${detail?"":"visibility:hidden"}">${otevr?"▾":"▸"}</button>
               <input type="text" class="${U[k.id]?"used":""}" value="${esc(k.nazev)}" data-f="nazev" data-id="${k.id}" style="flex:1;min-width:0">
               ${cesteHtml(k.id)}</div></td>
+        <td>${(()=>{const M=modelyTexty(k.id);
+            if(!M.length)return `<span class="muted" style="font-size:11.5px">—</span>`;
+            return `<div class="row" style="gap:4px;align-items:center;min-width:0">
+              <span style="flex:1;min-width:0;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                title="${esc(M.join("\n"))}">${esc(M[0])}${M.length>1?` <em style="color:var(--ink-3);font-style:normal">+${M.length-1}</em>`:""}</span>
+              <button class="icon-x" data-kopmodel="${k.id}" title="Zkopírovat ${M.length>1?"všechny modely":"model"} do schránky">⧉</button>
+            </div>`})()}</td>
         <td><input type="text" value="${esc(k.dod)}" data-f="dod" data-id="${k.id}" placeholder="—"
               style="width:100%;font-size:11.5px;${stylDodavatele(k.dod)}"></td>
         <td><input type="text" value="${esc(k.kodEshop||"")}" data-f="kodEshop" data-id="${k.id}" placeholder="—"
@@ -1089,7 +1096,7 @@ function renderKomp(){
             <button class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny">📈</button>
             <button class="icon-x" data-del="${k.id}" title="Smazat">×</button></td>
       </tr>
-      ${otevr?`<tr class="kdetail"><td colspan="9" style="background:#FAFBFC">
+      ${otevr?`<tr class="kdetail"><td colspan="10" style="background:#FAFBFC">
         <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;padding:2px 0 4px">
           ${cat==="CPU"?`
             <input type="text" value="${esc(k.socket||"")}" data-f="socket" data-id="${k.id}" placeholder="socket"
@@ -1282,7 +1289,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=202;
+const VERZE=203;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1980,6 +1987,26 @@ function naCeste(id){
 function cesteHtml(id){
   const n=naCeste(id);
   return n?` <span class="band" style="background:#E4EEFB;color:#2C5B96" title="objednáno, zatím nedodáno">${n} ks na cestě</span>`:"";
+}
+/* Konkrétní modely komponenty jako jeden text — z nákupů i z ruční poznámky.
+   Používá se pro zobrazení v řádku i pro zkopírování do schránky. */
+function modelyTexty(id){
+  const k=najdiKomp(id); if(!k)return [];
+  /* Dvě dodávky téhož modelu vypíšeme jako jeden řádek se součtem kusů. */
+  const sloucene=new Map();
+  for(const x of modelyZNakupu(id).filter(y=>y.popis))
+    sloucene.set(x.popis,(sloucene.get(x.popis)||0)+(Number(x.ks)||0));
+  const z=[...sloucene].map(([popis,ks])=>(ks>1?ks+"× ":"")+popis);
+  const rucni=(k.modely||"").split("\n").map(x=>x.trim()).filter(Boolean);
+  /* Ruční poznámka často opakuje totéž, co se vyčetlo z nákupů — jen bez počtu
+     a ceny. Takové řádky nevypisujeme dvakrát. */
+  const klic=t=>String(t).toLowerCase().replace(/^\d+×\s*/,"").replace(/\(.*?\)/g,"")
+    .replace(/[^a-z0-9]+/g," ").trim();
+  const videno=new Set(z.map(klic));
+  return [...z,...rucni.filter(r=>{const q=klic(r);
+    if(!q||videno.has(q))return false;
+    for(const v of videno)if(v.includes(q)||q.includes(v))return false;
+    videno.add(q); return true;})];
 }
 function modelyZNakupu(id){
   const k=najdiKomp(id); if(!k)return [];
@@ -4655,6 +4682,20 @@ document.addEventListener("click",e=>{
     if(t.id==="prVlastni"){nc.typ="vlastni";nc.nazev="";nc.slozeni="";nc.nakup=null}
     D.pripravene.push(nc); prOtevrene[nc.id]=true;
     renderPripravene(); persist(); return}
+  if(t.dataset.kopmodel){
+    const M=modelyTexty(t.dataset.kopmodel);
+    const txt=M.join("\n");
+    const hotovo=()=>toast(M.length>1?M.length+" modelů zkopírováno":"Model zkopírován");
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+      navigator.clipboard.writeText(txt).then(hotovo,()=>toast("Nepodařilo se zkopírovat"));
+    else{
+      /* Záložní cesta pro prohlížeč bez přístupu ke schránce. */
+      const ta=document.createElement("textarea"); ta.value=txt;
+      document.body.appendChild(ta); ta.select();
+      try{document.execCommand("copy");hotovo()}catch(e){toast("Nepodařilo se zkopírovat")}
+      ta.remove();
+    }
+    return}
   if(t.dataset.kbal){kompOtevrene[t.dataset.kbal]=!kompOtevrene[t.dataset.kbal];renderKomp();return}
   if(t.dataset.prbal&&!(e.target.closest&&e.target.closest("[data-stop]"))){
     prOtevrene[t.dataset.prbal]=!prOtevrene[t.dataset.prbal];
