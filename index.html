@@ -1055,8 +1055,9 @@ function renderKomp(){
     el.innerHTML=`<header><span class="rail" style="--k:${railFor(cat)}"></span>
       <h3>${esc(cat)}</h3><span class="count">${jenNep?vis.length+"/"+arr.length:arr.length}</span>
       <button class="icon-x" data-delcat="${esc(cat)}" title="Smazat kategorii">×</button></header>
-      <div class="tbl"><table><thead><tr>
-        <th>Komponenta</th><th>Přesný model</th><th style="width:120px">Dodavatel</th><th style="width:92px">Kód e-shopu</th>
+      <div class="tbl"><table style="table-layout:fixed;width:100%"><thead><tr>
+        <th style="width:210px">Komponenta</th><th>Přesný model</th>
+        <th style="width:104px">Dodavatel</th><th style="width:84px">Kód e-shopu</th>
         <th class="r" style="width:64px" title="Kusů skladem">Ks</th>
         <th class="r" style="width:92px">Skladová</th><th class="r" style="width:92px">Reprod.</th>
         <th class="r" style="width:86px">Použitá</th><th style="width:118px">Režim</th>
@@ -1070,12 +1071,13 @@ function renderKomp(){
                 style="${detail?"":"visibility:hidden"}">${otevr?"▾":"▸"}</button>
               <input type="text" class="${U[k.id]?"used":""}" value="${esc(k.nazev)}" data-f="nazev" data-id="${k.id}" style="flex:1;min-width:0">
               ${cesteHtml(k.id)}</div></td>
-        <td>${(()=>{const M=modelyTexty(k.id);
+        <td style="overflow:hidden">${(()=>{const M=modelyTexty(k.id);
             if(!M.length)return `<span class="muted" style="font-size:11.5px">—</span>`;
-            return `<div class="row" style="gap:4px;align-items:center;min-width:0">
-              <span style="flex:1;min-width:0;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+            return `<div class="row" style="gap:4px;align-items:center;min-width:0;flex-wrap:nowrap">
+              <span style="flex:1 1 auto;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
                 title="${esc(M.join("\n"))}">${esc(M[0])}${M.length>1?` <em style="color:var(--ink-3);font-style:normal">+${M.length-1}</em>`:""}</span>
-              <button class="icon-x" data-kopmodel="${k.id}" title="Zkopírovat ${M.length>1?"všechny modely":"model"} do schránky">⧉</button>
+              <button class="icon-x" data-kopmodel="${k.id}" style="flex:0 0 auto"
+                title="Zkopírovat ${M.length>1?"všechny modely":"model"} do schránky">⧉</button>
             </div>`})()}</td>
         <td><input type="text" value="${esc(k.dod)}" data-f="dod" data-id="${k.id}" placeholder="—"
               style="width:100%;font-size:11.5px;${stylDodavatele(k.dod)}"></td>
@@ -1289,7 +1291,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=203;
+const VERZE=204;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
