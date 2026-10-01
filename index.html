@@ -1057,9 +1057,9 @@ function renderKomp(){
       <button class="icon-x" data-delcat="${esc(cat)}" title="Smazat kategorii">×</button></header>
       <div class="tbl"><table style="table-layout:fixed;width:100%">
       <colgroup>
-        <col style="width:19%"><col style="width:30%"><col style="width:9%"><col style="width:6%">
+        <col style="width:21%"><col style="width:25%"><col style="width:9%"><col style="width:6%">
         <col style="width:4%"><col style="width:7%"><col style="width:7%"><col style="width:7%">
-        <col style="width:7%"><col style="width:4%">
+        <col style="width:8%"><col style="width:6%">
       </colgroup>
       <thead><tr>
         <th>Komponenta</th><th>Přesný model</th>
@@ -1071,12 +1071,14 @@ function renderKomp(){
       <tbody>${vis.map(k=>{
         const otevr=!!kompOtevrene[k.id];
         const detail=cat==="CPU"||k.genericky||(k.modely||"").trim()||modelyZNakupu(k.id).some(x=>x.popis);
-        return `<tr class="${U[k.id]?"":"unused"}">
-        <td><div class="row" style="gap:5px;align-items:center">
+        return `<tr class="${U[k.id]?"":"unused"}" style="white-space:nowrap">
+        <td style="overflow:hidden"><div class="row" style="gap:5px;align-items:center;flex-wrap:nowrap;min-width:0">
               <button class="sipka" data-kbal="${k.id}" title="${otevr?"Sbalit":"Podrobnosti"}"
-                style="${detail?"":"visibility:hidden"}">${otevr?"▾":"▸"}</button>
-              <input type="text" class="${U[k.id]?"used":""}" value="${esc(k.nazev)}" data-f="nazev" data-id="${k.id}" style="flex:1 1 auto;min-width:0;width:100%">
-              ${cesteHtml(k.id)}</div></td>
+                style="flex:0 0 auto;${detail?"":"visibility:hidden"}">${otevr?"▾":"▸"}</button>
+              <input type="text" class="${U[k.id]?"used":""}" value="${esc(k.nazev)}" data-f="nazev" data-id="${k.id}"
+                style="flex:1 1 auto;min-width:0;width:100%">
+              ${naCeste(k.id)?`<span class="band" style="flex:0 0 auto;background:#E4EEFB;color:#2C5B96;white-space:nowrap"
+                title="objednáno, zatím nedodáno">+${naCeste(k.id)}</span>`:""}</div></td>
         <td style="overflow:hidden">${(()=>{const M=modelyTexty(k.id);
             if(!M.length)return `<span class="muted" style="font-size:11.5px">—</span>`;
             return `<div class="row" style="gap:4px;align-items:center;min-width:0;flex-wrap:nowrap">
@@ -1100,9 +1102,10 @@ function renderKomp(){
           <button data-akt="sklad" data-id="${k.id}" aria-pressed="${k.akt==="sklad"}">skl</button>
           <button data-akt="novy" data-id="${k.id}" aria-pressed="${k.akt==="novy"}">rep</button>
         </span></td>
-        <td class="r"><span class="use ${U[k.id]?"":"zero"}" data-kde="${k.id}" title="${U[k.id]?"použito v "+U[k.id]+" sestavách":"nepoužito"}">${U[k.id]||0}</span>
-            <button class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny">📈</button>
-            <button class="icon-x" data-del="${k.id}" title="Smazat">×</button></td>
+        <td class="r" style="white-space:nowrap">
+            <span class="use ${U[k.id]?"":"zero"}" data-kde="${k.id}" title="${U[k.id]?"použito v "+U[k.id]+" sestavách":"nepoužito"}">${U[k.id]||0}</span><button
+             class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny">📈</button><button
+             class="icon-x" data-del="${k.id}" title="Smazat">×</button></td>
       </tr>
       ${otevr?`<tr class="kdetail"><td colspan="10" style="background:#FAFBFC">
         <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;padding:2px 0 4px">
@@ -1300,7 +1303,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=206;
+const VERZE=207;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
