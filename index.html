@@ -72,7 +72,9 @@ input[type=date]::-webkit-inner-spin-button{display:none}
 .hint{font-size:12.5px;color:var(--ink-3);margin:2px 0 14px}
 
 /* ---------- components ---------- */
-.blocks{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:14px;align-items:start}
+/* Jeden sloupec pod sebou, stejně jako Sklad a Sestavy — řádky komponent jsou
+   široké a vedle sebe by se nevešly. */
+.blocks{display:grid;grid-template-columns:1fr;gap:14px;align-items:start}
 .block{overflow:hidden}
 .block>header{display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line);background:#fff}
 .rail{width:4px;align-self:stretch;min-height:22px;border-radius:3px;background:var(--k,#999)}
@@ -224,7 +226,7 @@ tr.unused td{background:#FEFCFB}
    Místo toho dostanou pevnou minimální šířku a posouvají se do stran. */
 .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}
 @media(max-width:1100px){
-  .blocks{grid-template-columns:repeat(auto-fill,minmax(380px,1fr))}
+  .blocks{grid-template-columns:1fr}
 }
 /* Tabulky se přepínají do posuvného režimu už na tabletech a rozloženém foldu —
    tam se totiž sloupce roztahovaly podle šířek psaných pro velký monitor. */
@@ -1280,7 +1282,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=201;
+const VERZE=202;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
