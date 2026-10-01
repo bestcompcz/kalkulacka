@@ -1211,8 +1211,11 @@ function buildCard(s){
         <input type="text" value="${esc(s.url||"")}" data-su="${s.id}" placeholder="URL na e-shopu"
           style="max-width:170px;font-size:12px;color:var(--ink-3)">
         ${s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn btn-sm" title="Otevřít na e-shopu">↗</a>`:""}
-        ${s.drzena!=null?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700"
-          title="Do exportů se nezahrne, dokud držení nezrušíš">držím ${kc(s.drzena)}</span>
+        ${s.drzena!=null?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:5px"
+          title="Cena, na které sestavu držíš. Do exportů se nezahrne, dokud držení nezrušíš.">držím
+          <input type="number" value="${s.drzena}" data-drzc="${s.id}"
+            style="width:76px;padding:1px 4px;text-align:right;font-weight:700;font-size:12px;
+                   border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.18);color:#fff"></span>
           <button class="btn btn-sm" data-odrz="${s.id}" title="Zrušit držení a používat vypočtenou cenu">Zrušit držení</button>`:""}
         <span style="flex:1"></span>
         <button class="btn btn-sm" data-spec="${s.id}" title="Vypsat konkrétní komponenty pro zákazníka">Specifikace</button>
@@ -1297,7 +1300,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=205;
+const VERZE=206;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4407,9 +4410,14 @@ document.addEventListener("input",e=>{
   if(t.id==="prHledat"){prQ=t.value;renderPripravene();return}
   if(t.dataset.drzc){
     /* Při psaní jen uložíme a dopočítáme dotčený řádek. Překreslit celé okno
-       by uteklo kurzoru a okno by skočilo nahoru už po první číslici. */
+       nebo seznam sestav by uteklo kurzoru. */
     const s=D.sestavy.find(x=>x.id===t.dataset.drzc);
-    if(s){s.drzena=t.value===""?null:Number(t.value); osvezDrzenyRadek(t,s); persist()}
+    if(s){
+      s.drzena=t.value===""?null:Number(t.value);
+      if(t.closest("tr"))osvezDrzenyRadek(t,s);     // v okně přepočtu
+      else osvezVypocet(t,s);                        // na kartě sestavy
+      persist();
+    }
     return}
   if(t.dataset.nb){const n=nbNajdi(); if(n){
       n[t.dataset.nb]=["marze","prace","windows"].includes(t.dataset.nb)?(t.value===""?null:Number(t.value)):t.value;
