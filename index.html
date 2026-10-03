@@ -761,6 +761,7 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!d.parovani||typeof d.parovani!=="object")d.parovani={};  // naučené dvojice popis → komponenta
   if(!Array.isArray(d.cenaZaKus))d.cenaZaKus=["mironet"];      // uvádějí cenu za kus, ne za položku
   if(!Array.isArray(d.pripravene))d.pripravene=[];             // předem postavené počítače
+  if(!Array.isArray(d.jednorazove))d.jednorazove=[];           // kódy, které se nikdy neodečítají
   for(const arr of Object.values(d.komponenty||{}))for(const k of arr)
     if(k.ksExt===undefined)k.ksExt=null;       // kusy uložené v externím skladu
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
@@ -1303,7 +1304,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=207;
+const VERZE=208;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2507,9 +2508,12 @@ function kOdpisu(txt){
          a položka by sedla na první komponentu bez e-shopového kódu. */
       let z=null;
       if(kod)for(const[c,a]of Object.entries(D.komponenty))for(const k of a)if(String(k.kodEshop||"")===kod)z=k;
-      /* Bez kódu nebo s neznámým kódem zkusíme položku poznat podle názvu z e-shopu. */
+      /* Podle názvu hádáme JEN u položky bez kódu. Když kód existuje a nic jsme pod
+         ním nenašli, je to neznámý produkt — třeba jednorázový custom stroj. Hádat
+         u něj komponentu podle názvu je nebezpečné: odečetl by se jeden disk místo
+         celého počítače. */
       const nazevProdeje=r.orderItemName||r.itemName||"";
-      if(!z)z=komponentaZNazvuProdeje(nazevProdeje);
+      if(!z&&!kod)z=komponentaZNazvuProdeje(nazevProdeje);
       if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"neomezené"})}
       else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:kod?"zboží":"podle názvu"})}
       /* Položka bez kódu bývá jednorázová služba nebo doúčtování — ze skladu se
@@ -2517,6 +2521,12 @@ function kOdpisu(txt){
          je jiná věc: tam se nejspíš nepodařilo poznat komponentu. */
       else if(!kod){obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"služba, neodečítá se"});
         sluzby.push(C+" · "+nazevProdeje)}
+      else if(D.jednorazove&&D.jednorazove.includes(kod)){
+        /* Kód, který Lukáš označil jako jednorázový stroj mimo ceník — ví se o něm,
+           nic se neodečítá. */
+        obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),ks:poc,castka,
+          stav:"jednorázový, neodečítá se"});
+        sluzby.push(C+" · "+kod+" · "+nazevProdeje)}
       else {obj.push({C,kod,nazev:nazevProdeje,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"NEZNÁMÝ KÓD"});
         chyby.push(kod)}
       continue;
@@ -2619,6 +2629,7 @@ function zobrazOdpis(){
     o.stav==="ok"?"#F1FAF4"
     :(o.stav==="zboží"||o.stav==="podle názvu")?"#F7FAFF"
     :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené"||o.stav==="duplicitní řádek")?"#F3F4F6"
+    :o.stav==="jednorázový, neodečítá se"?"#FFF8E1"
     :o.stav==="služba, neodečítá se"?"#FFF8E1"
     :"#FDECEA"}">
     <td class="num">${esc(o.C)}</td><td class="num">${esc(o.kod)}</td>
@@ -2627,11 +2638,23 @@ function zobrazOdpis(){
     <td><span class="band">${o.stav}</span></td></tr>`).join("")
     ||'<tr><td colspan="5" style="padding:22px;text-align:center;color:var(--ink-3)">Nic k odepsání.</td></tr>';
   const nove=R.obj.filter(o=>o.stav!=="již odepsáno"&&o.stav!=="NEZNÁMÝ KÓD"
-    &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se"&&o.stav!=="duplicitní řádek").length;
+    &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se"&&o.stav!=="duplicitní řádek"
+    &&o.stav!=="jednorázový, neodečítá se").length;
   $("#pdSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Položek v souboru</div><div class="price" style="font-size:20px">${R.obj.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">K odepsání</div><div class="price" style="font-size:20px;color:var(--ok)">${nove}</div></div>
     <div><div class="muted" style="font-size:11.5px">Problémů</div><div class="price" style="font-size:20px;color:${R.chyby.length?"var(--bad)":"var(--ink-3)"}">${R.chyby.length}</div></div>`;
-  if(R.chyby.length){toast("Nejdřív vyřeš "+R.chyby.length+" nenapárovaných položek");return}
+  if(R.chyby.length){
+    /* Neznámý kód může být jednorázový stroj mimo ceník. Nabídneme ho označit,
+       ať se jím odpis nezasekne a příště se na něj nebude ptát. */
+    const kody=[...new Set(R.chyby)];
+    const ano=confirm("Nenapárované kódy: "+kody.join(", ")+
+      "\n\nJsou to jednorázové stroje mimo ceník, u kterých se nemá nic odečítat?\n"+
+      "OK = označit je tak natrvalo · Storno = nejdřív je založím do ceníku");
+    if(ano){
+      D.jednorazove=[...new Set([...(D.jednorazove||[]),...kody])];
+      persist(); zobrazOdpis();           // přepočítáme, kódy už nebudou blokovat
+    } else toast("Založ sestavu nebo komponentu s tím kódem a načti prodeje znovu");
+    return}
   if((R.sluzby||[]).length&&!confirm("V objednávkách je "+R.sluzby.length+" položka bez kódu, "
       +"typicky služba nebo doúčtování:\n\n"+R.sluzby.join("\n")
       +"\n\nZe skladu se nic neodečte. Pokračovat?"))return;
