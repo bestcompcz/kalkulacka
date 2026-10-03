@@ -1229,6 +1229,8 @@ function buildCard(s){
         :`
         <div class="hlavicka">
           ${kodZ?`<span class="band" style="background:rgba(255,255,255,.7);font-weight:700">${esc(kodZ)}</span>`:""}
+          ${/kancel/i.test(s.nazev||"")?`<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700"
+            title="Kancelářský počítač — do cenových levelů nepatří">kancelář</span>`:""}
           <span class="hcpu">${esc(cpu||"— bez CPU —")}</span>
           <span class="hgpu">${esc(gpu||"")}</span>
           <span class="hdetail">${strucne}</span>
@@ -1304,7 +1306,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=209;
+const VERZE=210;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
