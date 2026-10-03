@@ -1304,7 +1304,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=208;
+const VERZE=209;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1699,9 +1699,12 @@ function zmenyCen(){
     const V=varianty(s);
     /* Samostatný produkt bez variant skříní (třeba 642) se porovnává podle ceny sestavy. */
     if(!V.length){
-      const nova=spocti(s).prodej;
+      const vypocet=spocti(s).prodej;
+      /* Držená cena je cena, kterou chci mít na e-shopu — ne důvod sestavu vynechat.
+         Když se liší od toho, co na e-shopu je, musí se vyexportovat. */
+      const nova=s.drzena!=null?Number(s.drzena):vypocet;
       const stara=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
-      if(stara===null||nova!==stara)out.push({s,kody,kodZakl:kody[0],stara,nova,drzena:s.drzena!=null});
+      if(stara===null||nova!==stara)out.push({s,kody,kodZakl:kody[0],stara,nova,vypocet,drzena:s.drzena!=null});
       continue;
     }
     /* Základní varianta je ta nejlevnější — ale jen mezi skříněmi, na které
@@ -1712,7 +1715,8 @@ function zmenyCen(){
       ? podleKodu.reduce((a,b)=>b.v.cenaProdej<a.v.cenaProdej?b:a)
       : null;
     const zakl=nejl?nejl.v:V.reduce((a,b)=>b.cenaProdej<a.cenaProdej?b:a);
-    const nova=zakl.cenaProdej;
+    const vypocet=zakl.cenaProdej;
+    const nova=s.drzena!=null?Number(s.drzena):vypocet;   // držená cena je cíl
     const kodZakl=nejl?nejl.kod:(kodVarianty(kody,zakl.k?zakl.k.nazev:null)||kody[0]);
     const stara=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
     /* Do seznamu patří i sestava, které cena sedí, ale má na e-shopu špatný level —
@@ -1721,7 +1725,8 @@ function zmenyCen(){
     const lvlNovy=LEVELY.find(([lim])=>nova<=lim)[1];
     const spatnyLevel=!!lvlStary&&!stejnyLevel(lvlStary,lvlNovy);
     if(stara===null||nova!==stara||spatnyLevel)
-      out.push({s,kody,kodZakl,stara,nova,drzena:s.drzena!=null,jenLevel:stara===nova&&spatnyLevel});
+      out.push({s,kody,kodZakl,stara,nova,vypocet,drzena:s.drzena!=null,
+        jenLevel:stara===nova&&spatnyLevel});
   }
   return out.sort((a,b)=>Math.abs((b.nova-(b.stara??b.nova)))-Math.abs((a.nova-(a.stara??a.nova))));
 }
@@ -1743,8 +1748,9 @@ function zobrazZmenyCen(){
       const lvlNovy=LEVELY.find(([lim])=>x.nova<=lim)[1];
       const zmenaLvl=lvlStary&&!stejnyLevel(lvlStary,lvlNovy);
       return `<tr style="background:${x.drzena?"#FDE7E4":r===null?"#FFF8E1":"#FFFFFF"}">
-      <td class="r"><input type="checkbox" ${x.drzena?"":"checked"} data-cz="${i}" style="width:auto;cursor:pointer"></td>
-      <td><strong>${esc(x.s.nazev)}</strong>${x.drzena?' <span class="band" style="background:#C0392B;color:#fff;font-weight:700">držená cena</span>':""}</td>
+      <td class="r"><input type="checkbox" checked data-cz="${i}" style="width:auto;cursor:pointer"></td>
+      <td><strong>${esc(x.s.nazev)}</strong>${x.drzena?` <span class="band" style="background:#C0392B;color:#fff;font-weight:700"
+        title="Posílá se tvoje držená cena, výpočet dává ${kc(x.vypocet)}">držená cena</span>`:""}</td>
       <td style="font-size:11.5px">${esc(x.kodZakl)}</td>
       <td class="r num">${x.stara===null?"—":kc(x.stara)}</td>
       <td class="r num" style="font-weight:600">${kc(x.nova)}</td>
@@ -3526,7 +3532,10 @@ function provedVse(){
   }
   for(const z of A.ceny){z.k.sklad=z.prum; z.k.modely=z.modely}
   A.sest.forEach((g,i)=>{
-    if(drzet.has(i)) g.s.drzena=(g.s.excel!=null&&g.s.excel!=="")?Number(g.s.excel):g.nejPred;
+    /* Odškrtnutá sestava si drží cenu. Když ale Lukáš drženou cenu sám zadal,
+       nechá se jeho — jinak by se mu přepsala zpátky na cenu z e-shopu. */
+    if(drzet.has(i)) g.s.drzena=(g.s.drzena!=null&&g.s.drzena!=="")?Number(g.s.drzena)
+      :((g.s.excel!=null&&g.s.excel!=="")?Number(g.s.excel):g.nejPred);
     else g.s.drzena=null;
   });
   return {n:A.nask.length,c:A.ceny.length,drzet};
@@ -3570,6 +3579,26 @@ function vsePotvrd(csvTaky,vseSoubory){
   /* Všechno pro Shoptet naráz — ceny už jsou stažené výš, teď kategorie a příplatky.
      Soubory se pouštějí přes frontu s odstupem, jinak prohlížeč druhý nestihne. */
   if(vseSoubory){
+    /* Do cen patří i sestavy, které se tímhle naskladněním nehnuly, ale jejich cena
+       se rozešla s e-shopem — typicky po puštění držení nebo po ruční ceně. */
+    const uzMam=new Set();
+    A.sest.forEach((g,i)=>{ if(!r.drzet.has(i))for(const rd of g.radky)uzMam.add(rd.kod) });
+    const rowsD=[["code","pairCode","price"]]; let nd=0;
+    for(const x of zmenyCen()){
+      const V=varianty(x.s);
+      const posun=x.vypocet!=null?(x.nova-x.vypocet):0;
+      for(const kod of x.kody){
+        if(uzMam.has(kod))continue;
+        const v=variantaProKod(x.s,V,kod);
+        rowsD.push([kod,pairProKod(kod,x.s),String(Math.round((v?v.cenaProdej:spocti(x.s).prodej)+posun))]); nd++;
+      }
+      x.s.excel=x.nova;
+      if(x.s.drzena!=null)x.s.drzena=x.nova;
+    }
+    if(nd){
+      dl(`shoptet-ceny-doplnek-${dnes()}-${nd}variant.csv`,csv(bezNulovychCen(rowsD)),"text/csv");
+      hlaska+=`, doplněk s ${nd} variantami`;
+    }
     const rowsK=[]; let KATmax=0;
     A.sest.forEach((g,i)=>{
       if(r.drzet.has(i))return;
@@ -4790,9 +4819,12 @@ document.addEventListener("click",e=>{
       const novyLvl=LEVELY.find(([lim])=>x.nova<=lim)[1];
       const staryLvl=(x.s.kategorie||[]).find(jeLevel);
       const zmenaLvl=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
+      /* U držené sestavy posuneme všechny varianty o stejný rozdíl, ať si drží
+         odstupy mezi skříněmi. */
+      const posun=x.vypocet!=null?(x.nova-x.vypocet):0;
       for(const kod of x.kody){
         const v=variantaProKod(x.s,V,kod);
-        const cenaK=v?v.cenaProdej:spocti(x.s).prodej;
+        const cenaK=(v?v.cenaProdej:spocti(x.s).prodej)+posun;
         rows.push([kod,pairProKod(kod,x.s),String(Math.round(cenaK))]);
         if(zmenaLvl&&(x.s.kategorie||[]).length){
           const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLvl,y):y);
@@ -4801,7 +4833,9 @@ document.addEventListener("click",e=>{
         }
       }
       if(zmenaLvl)lvl++;
-      x.s.drzena=null;
+      x.s.excel=x.nova;              // od teď porovnávám proti tomu, co jsem poslal
+      if(x.s.drzena==null)x.s.drzena=null;   // u nedržené se nic nemění
+      else x.s.drzena=x.nova;        // držená zůstává držená, jen už sedí s e-shopem
     }
     const kody=vyb.map(x=>x.kodZakl.split("/")[0]).join("-").slice(0,40);
     dl(`shoptet-ceny-${dnes()}-${vyb.length}sestav-${rows.length-1}variant-${kody}.csv`,csv(bezNulovychCen(rows)),"text/csv");
