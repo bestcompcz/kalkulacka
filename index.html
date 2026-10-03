@@ -1306,7 +1306,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=210;
+const VERZE=211;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4057,25 +4057,51 @@ function naskladnenoPo(id,dat){
   return n;
 }
 function nahradRam(suma,obj,poDat){
-  for(const[id,q]of [...suma.entries()]){
+  /* Náhrady se řetězí: když chybí 64GB, nahradí se dvěma 32GB — a když nejsou ani
+     ty, musí se jít dál na 16GB. Proto několik průchodů, od největších modulů. */
+  for(let kolo=0;kolo<4;kolo++) if(!nahradRamKolo(suma,obj,poDat))break;
+}
+function nahradRamKolo(suma,obj,poDat){
+  let zmena=false;
+  /* Od největší kapacity, ať se nahrazené kusy stihnou projít v témže kole. */
+  const poradi=[...suma.entries()].sort((a,b)=>{
+    const kap=x=>{const k=najdiKomp(x);const m=k?norm3(k.nazev).match(/^(\d+)\s*gb/):null;return m?Number(m[1]):0};
+    return kap(b[0])-kap(a[0]);
+  });
+  for(const[id]of poradi){
+    /* Mnozstvi cteme az tady - predchozi nahrada v tomhle kole ho mohla zvysit. */
+    const q=suma.get(id)||0; if(q<=0)continue;
     const k=najdiKomp(id); if(!k)continue;
     const pol=polovicniModul(k); if(!pol)continue;
     const ks=Math.max(0,Number(k.ks)||0);
     /* Objednávky projdeme od nejstarší. Každá smí sáhnout jen na kusy, které byly
        skladem v její den — pozdější dodávky se jí nepočítají. */
     const obj2=((poDat&&poDat.get(id))||[{dat:"",q}]).slice().sort((a,b)=>a.dat<b.dat?-1:1);
-    let spotreba=0, chybi=0;
+    let spotreba=0, chybi=0;   // chybi = kolik kusů se ten den nedostávalo
     for(const o of obj2){
       const k_dispozici=Math.max(0,ks-naskladnenoPo(id,o.dat)-spotreba);
       const vezmu=Math.min(o.q,k_dispozici);
       spotreba+=vezmu; chybi+=o.q-vezmu;
     }
+    chybi=Math.min(chybi,q);          // nikdy nenahrazuj víc, než se vůbec prodalo
     if(chybi<=0)continue;
     const skladem=q-chybi;
     if(skladem>0)suma.set(id,skladem); else suma.delete(id);
     suma.set(pol.id,(suma.get(pol.id)||0)+2*chybi);
+    /* Co jsme z této komponenty opravdu vzali ze skladu, zapíšeme zpět — další kolo
+       tak vidí jen zbytek a nenahrazuje podruhé totéž. Náhrada jde na poloviční
+       modul s datem nejstarší objednávky, která ji vyvolala. */
+    if(poDat){
+      const den=(obj2[0]&&obj2[0].dat)||"";
+      if(skladem>0)poDat.set(id,[{dat:den,q:skladem}]); else poDat.delete(id);
+      const kam=poDat.get(pol.id)||[];
+      kam.push({dat:den,q:2*chybi});
+      poDat.set(pol.id,kam);
+    }
     obj.push({C:"",kod:"",nazev:chybi+"× "+k.nazev+" → "+(2*chybi)+"× "+pol.nazev,dat:"",stav:"náhrada"});
+    zmena=true;
   }
+  return zmena;
 }
 /* Když položka nemá kód, zkusíme ji poznat podle názvu z e-shopu.
    Sáhne i do běžných komponent, ne jen do přeprodávaného zboží. */
