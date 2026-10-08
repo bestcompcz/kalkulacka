@@ -658,6 +658,13 @@ tr.unused td{background:#FEFCFB}
       <tbody id="naklBody"></tbody></table></div>
       <div class="addrow"><button class="btn btn-sm" id="addNakl">Přidat řádek</button></div>
     </div>
+    <div class="card block" style="grid-column:1/-1">
+      <header><span class="rail" style="--k:var(--mb)"></span><h3>Desky s integrovanou WiFi</h3></header>
+      <p class="hint" style="padding:8px 12px 0;margin:0">Zákazník si zaplatí příplatek za modul a místo desky s modulem se osadí rovnou deska s WiFi — pokud je skladem v den objednávky. Spouští to konkrétní modul, ne parametr: pro WIFI 5 si přidej vlastní řádek, jinak se u něj nic nestane. Platí v odpisu prodejů i v rozpisu připravených strojů.</p>
+      <div class="tbl"><table><thead><tr><th>Deska bez WiFi</th><th>Osadí se deskou</th><th>Modul, který tím padá</th><th style="width:36px"></th></tr></thead>
+      <tbody id="wifiBody"></tbody></table></div>
+      <div class="addrow"><button class="btn btn-sm" id="addWifi">Přidat řádek</button></div>
+    </div>
     <div class="card block">
       <header><span class="rail" style="--k:var(--misc)"></span><h3>Konstanty</h3></header>
       <div class="tbl"><table><tbody>
@@ -767,6 +774,10 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!d.migSmartyZaKus){ if(!d.cenaZaKus.includes("smarty"))d.cenaZaKus.push("smarty"); d.migSmartyZaKus=1 }
   if(!Array.isArray(d.pripravene))d.pripravene=[];             // předem postavené počítače
   if(!Array.isArray(d.jednorazove))d.jednorazove=[];           // kódy, které se nikdy neodečítají
+  /* Deska s integrovanou WiFi, kterou se osadí místo desky a modulu, když si zákazník
+     modul zaplatil. Pár se zadává v Nastavení — z názvu se nehádá, protože deska
+     s WiFi bývá jiný model i jiný formát než ta bez. */
+  if(!Array.isArray(d.wifiDesky))d.wifiDesky=[];
   for(const arr of Object.values(d.komponenty||{}))for(const k of arr)
     if(k.ksExt===undefined)k.ksExt=null;       // kusy uložené v externím skladu
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
@@ -1311,7 +1322,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=215;
+const VERZE=218;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2074,11 +2085,18 @@ function chibiRow(x){return x?`<tr><td colspan="2" style="color:var(--signal)">b
 function cistyModel(t){
   /* Pořadí je důležité: nejdřív pryč počet na začátku, teprve pak předpona kategorie —
      poznámky z přepočtu mají tvar „3× Operační paměť Patriot … (2890 Kč)". */
-  return String(t||"")
-    .replace(/^\s*\d+\s*(?:×|x)\s*/i,"")
+  const s=String(t||"").replace(/^\s*\d+\s*(?:×|x)\s*/i,"");
+  /* Řádek, který při přepočtu skladových cen vznikne z několika nákupů jednoho dne:
+     „průměr z 2026-01-13 (8273 Kč, 4 nákupy: 10× 8125, …)". Je to interní záznam
+     o váženém průměru, ne název modelu — do kopírování zákazníkovi nepatří vůbec. */
+  if(/^pr[uů]m[ěe]r\s+z\s/i.test(s))return "";
+  return s
     .replace(/^(Grafick[áa] karta|Procesor|Opera[čc]n[íi] pam[ěe][ťt]|Z[áa]kladn[íi] deska|Sk[řr][íi][ňn]|SSD disk|Zdroj)\s+/i,"")
     .replace(/\b(bulk|tray|box|u dodavatele|ROZBALENO)\b/gi,"")
     .replace(/\(\s*[\d\s]+(?:[,.]\d+)?\s*(?:Kč|CZK)\s*\)/gi,"")
+    /* Cena i bez závorky („Kingston NV3 1TB 1 299 Kč"). Jednotka je povinná, jinak
+       by zmizelo 16GB nebo 5060 Ti. */
+    .replace(/[\d\s\u00a0]+(?:[,.]\d+)?\s*(?:Kč|CZK)/gi," ")   /* bez \b — „č" není slovní znak, hranice by nikdy neplatila */
     .replace(/\s{2,}/g," ").trim().replace(/^[,\-]+|[,\-]+$/g,"");
 }
 /* Týdenní úklid: projdeme komponenty, kde se nabízí víc modelů, a odškrtneme ty,
@@ -2500,6 +2518,16 @@ function pripravenyRozpis(pc){
     const pryc=Math.max(...chlPrip.map(id=>urovenChl(nm(id))))>Math.max(...chlCpu.map(id=>urovenChl(nm(id))))?chlCpu:chlPrip;
     for(const id of pryc)if(out.has(id))out.set(id,out.get(id)-1);
   }
+  /* Totéž co v odpisu: zaplacený modul a deska s WiFi verzí = drží se deska s WiFi.
+     Sklad se tu nekontroluje — stroj už je postavený, díly z něj skutečně odešly. */
+  for(const w of (D.wifiDesky||[])){
+    if(!w.deska||!w.wifi||!w.modul)continue;
+    const n=Math.min(out.get(w.deska)||0,out.get(w.modul)||0);
+    if(n<=0)continue;
+    out.set(w.deska,(out.get(w.deska)||0)-n);
+    out.set(w.modul,(out.get(w.modul)||0)-n);
+    pr(w.wifi,n);
+  }
   for(const[i,q]of [...out])if(q<=0)out.delete(i);
   return out;
 }
@@ -2550,6 +2578,9 @@ function rozpadSestavy(s,kod,poc,skrinNazev){
 }
 function kOdpisu(txt){
   const radky=csvRozdel(txt); const obj=[]; const suma=new Map(); const chyby=[]; const sluzby=[];
+  /* Objednávky, u kterých by šla osadit deska s integrovanou WiFi. Rozhodne se až
+     po celém souboru — teprve tam je vidět, na kolik strojů desky vůbec vystačí. */
+  const wifiKand=[];
   const pr=(m,i,q)=>{if(!i)return;const k=najdiKomp(i);if(k&&k.neomezene)return;m.set(i,(m.get(i)||0)+q)};
   /* U každého odepisovaného kusu si pamatujeme datum objednávky — náhrada pamětí
      se pak rozhoduje podle toho, co bylo skladem v den objednávky, ne dnes. */
@@ -2639,9 +2670,16 @@ function kOdpisu(txt){
       for(const id of pryc)if(m.has(id))m.set(id,m.get(id)-poc);
       info=" · osazen jen jeden chladič";
     }
+    /* Zaplacený modul a deska, ke které je v Nastavení WiFi verze — kandidát na záměnu. */
+    for(const w of (D.wifiDesky||[])){
+      if(!w.deska||!w.wifi||!w.modul)continue;
+      const n=Math.min(m.get(w.deska)||0,m.get(w.modul)||0);
+      if(n>0)wifiKand.push({w,q:n,dat:(r.date||"").slice(0,10)});
+    }
     for(const[i,q]of m) if(q>0){pr(suma,i,q);zaz(i,q,(r.date||"").slice(0,10))}
     obj.push({C,kod,nazev:s.nazev+pot+info,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:pot?"s výhradou":"ok"});
   }
+  nahradWifiDesky(suma,obj,poDat,wifiKand);
   nahradRam(suma,obj,poDat);
   return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)]};
 }
@@ -4169,6 +4207,46 @@ function naskladnenoPo(id,dat){
     if(x.komp===id&&x.naskladneno&&dat&&x.naskladneno>dat)n+=Number(x.zaskl)||0;
   return n;
 }
+/* Deska s integrovanou WiFi místo desky a modulu. Spouští to zaplacený modul, ne
+   parametr příplatku — WIFI 5 a WIFI 6 + Bluetooth mají každý svůj řádek v Nastavení. */
+function nahradWifiDesky(suma,obj,poDat,kand){
+  if(!kand||!kand.length)return;
+  /* Odebere kusy z evidence dat objednávek, od nejstarší — aby náhrada pamětí,
+     která běží po tomhle, neviděla kusy, které už tady padly. */
+  const odeberPoDat=(id,q)=>{
+    if(!poDat)return;
+    const arr=poDat.get(id); if(!arr)return;
+    let zb=q;
+    for(const z of arr){const v=Math.min(z.q,zb); z.q-=v; zb-=v; if(zb<=0)break}
+    const zbyle=arr.filter(z=>z.q>0);
+    if(zbyle.length)poDat.set(id,zbyle); else poDat.delete(id);
+  };
+  /* Od nejstarší objednávky: každá smí sáhnout jen na desky, které v její den byly
+     skladem. Pozdější dodávky se jí nepočítají, stejně jako u náhrady pamětí. */
+  const poradi=kand.slice().sort((a,b)=>String(a.dat||"").localeCompare(String(b.dat||"")));
+  const vzato=new Map();     // kolik WiFi desek už záměny spotřebovaly
+  const hotovo=new Map();    // co se nahradilo — jen kvůli výpisu v potvrzení
+  for(const c of poradi){
+    const w=c.w, kw=najdiKomp(w.wifi); if(!kw)continue;
+    const uz=vzato.get(w.wifi)||0;
+    const kDispozici=Math.max(0,(Number(kw.ks)||0)-naskladnenoPo(w.wifi,c.dat)-uz);
+    /* Nikdy nenahraď víc, než co v odpisu opravdu zbývá — deska i modul musí být oba. */
+    const n=Math.min(c.q,kDispozici,suma.get(w.deska)||0,suma.get(w.modul)||0);
+    if(n<=0)continue;
+    const uber=(id,q)=>{const z=(suma.get(id)||0)-q;
+      if(z>0)suma.set(id,z); else suma.delete(id); odeberPoDat(id,q)};
+    uber(w.deska,n); uber(w.modul,n);
+    suma.set(w.wifi,(suma.get(w.wifi)||0)+n);
+    if(poDat){const kam=poDat.get(w.wifi)||[]; kam.push({dat:c.dat,q:n}); poDat.set(w.wifi,kam)}
+    vzato.set(w.wifi,uz+n);
+    const kl=w.deska+"|"+w.modul+"|"+w.wifi;
+    hotovo.set(kl,(hotovo.get(kl)||0)+n);
+  }
+  const jm=id=>(najdiKomp(id)||{}).nazev||"?";
+  for(const[kl,n]of hotovo){const[a,b,c2]=kl.split("|");
+    obj.push({C:"",kod:"",nazev:n+"× "+jm(a)+" + "+n+"× "+jm(b)+" → "+n+"× "+jm(c2),
+      dat:"",stav:"náhrada"})}
+}
 function nahradRam(suma,obj,poDat){
   /* Náhrady se řetězí: když chybí 64GB, nahradí se dvěma 32GB — a když nejsou ani
      ty, musí se jít dál na 16GB. Proto několik průchodů, od největších modulů. */
@@ -4325,6 +4403,19 @@ function pripomenPripravene(R){
     +"Pokud jsi je nechal a složil nové, nech je být.";
   setTimeout(()=>alert(t),300);
 }
+/* Dva postavené stroje jsou tentýž, když se liší jen datem postavení. Všechno
+   ostatní je v klíči — poznámka i pevná cena, aby se škrábnutý kus nesléval
+   s bezvadným. Karta pak zastupuje celou skupinu a úpravy platí pro všechny kusy. */
+/* Záznam, do kterého se ještě nic nevyplnilo. Patří nahoru a nikdy se neslučuje —
+   dvě rozpracované karty vedle sebe by jinak vypadaly jako dva kusy jednoho stroje. */
+const prNovy=pc=>pc.typ==="vlastni"?!String(pc.nazev||"").trim():!pc.sest;
+function prKlic(pc){
+  if(prNovy(pc))return "novy:"+pc.id;
+  return JSON.stringify([pc.typ||"",pc.sest||"",pc.skrin||"",
+    [...(pc.priplatky||[])].sort(),pc.cena??"",pc.pozn||"",
+    pc.nazev||"",pc.slozeni||"",pc.nakup??""]);
+}
+function prSkupina(pc){const k=prKlic(pc); return (D.pripravene||[]).filter(x=>prKlic(x)===k)}
 function renderPripravene(){
   const seznam=$("#prSeznam"); if(!seznam)return;
   const L=D.pripravene||[];
@@ -4346,6 +4437,8 @@ function renderPripravene(){
   const sestPc=pc=>pc.typ==="vlastni"?null:D.sestavy.find(x=>x.id===pc.sest);
   const cenaCpu=pc=>{const s=sestPc(pc); const i=s&&s.vyber&&s.vyber["CPU"];const k=i?najdiKomp(i):null;return k?cena(k):0};
   const razene=[...L].sort((a,b)=>{
+    /* Rozpracovaný záznam nahoru, ať je po přidání hned vidět a dá se do něj psát. */
+    const na=prNovy(a)?0:1, nb=prNovy(b)?0:1; if(na!==nb)return na-nb;
     const va=a.typ==="vlastni"?1:0, vb=b.typ==="vlastni"?1:0; if(va!==vb)return va-vb;
     const sa=sestPc(a), sb=sestPc(b);
     if(!sa||!sb)return 0;
@@ -4365,14 +4458,19 @@ function renderPripravene(){
     return ((s?s.nazev+" "+s.kod:pc.nazev||"")+" "+komp+" "+skr+" "+pr+" "+(pc.pozn||"")).toLowerCase().includes(q);
   };
   const videt=razene.filter(sedi);
+  /* Stejné stroje do jedné karty. Reprezentant je první z už seřazeného seznamu,
+     takže se řazení karet nemění. */
+  const skup=new Map();
+  for(const pc of videt){const k=prKlic(pc); const g=skup.get(k); if(g)g.push(pc); else skup.set(k,[pc])}
   let nakupC=0, prodejC=0, nakupV=0, prodejV=0;
-  const karty=videt.map(pc=>{
+  const karty=[...skup.values()].map(G=>{
+    const pc=G[0], poc=G.length;
     const vlastni=pc.typ==="vlastni";
     const s=vlastni?null:D.sestavy.find(x=>x.id===pc.sest);
     const otevr=!!prOtevrene[pc.id];
     const nak=vlastni?(Number(pc.nakup)||0):(s?pripravenyNakup(pc):0);
     const pro=pripravenyProdej(pc);
-    nakupV+=nak; prodejV+=pro;
+    nakupV+=nak*poc; prodejV+=pro*poc;
     const marze=nak?Math.round(bezDph(pro)-bezDph(nak)):null;
     const V=s?varianty(s):[];
     const P=s?priplatkySestavy(s):[];
@@ -4386,8 +4484,9 @@ function renderPripravene(){
       .replace(/\s*\(.*?\)\s*/g," ").replace(/\s+/g," ").trim();
     const strucnePr=nazvyPr.map(zkratka).join(", ");
     const chybi=[];
+    /* Skupina drží díly za všechny kusy, tak se i porovnává proti celku. */
     if(!vlastni&&s)for(const[id,q]of pripravenyRozpis(pc)){
-      const k=najdiKomp(id); if(k&&(Number(k.ks)||0)<q)chybi.push(k.nazev);
+      const k=najdiKomp(id); if(k&&(Number(k.ks)||0)<q*poc)chybi.push(k.nazev);
     }
     const nazev=vlastni?(pc.nazev||"Vlastní sestava"):(s?s.nazev:"— vyber sestavu —");
     const _bg=s?barvaSestavy(s):"#F4F6F8";
@@ -4401,6 +4500,8 @@ function renderPripravene(){
           ${vlastni?`<span class="band" style="background:#EAF0FB;color:#2C4C86;font-weight:700">vlastní</span>`
             :`<span class="band" style="background:rgba(255,255,255,.7);font-weight:700">${esc(((s&&s.kod)||"").split(",")[0].trim().split("/")[0]||"—")}</span>`}
           <span class="hcpu">${esc(nazev)}</span>
+          ${poc>1?`<span class="band" style="background:#2C4C86;color:#fff;font-weight:700"
+            title="${poc} stejných strojů v jedné kartě">${poc} ks</span>`:""}
           ${skr?`<span class="hgpu">${esc(skr.nazev)}</span>`:""}
           <span class="hdetail">${strucne}</span>
         </div>
@@ -4415,7 +4516,7 @@ function renderPripravene(){
         <span class="muted" style="font-size:11.5px;margin-left:8px">nákup ${nak?kc(nak):"—"}</span>
         <span class="hcena">${kc(pro)}</span>
         <span class="muted" style="font-size:11.5px;margin-left:8px">${marze!=null?"marže "+kc(marze):""}</span>
-        <button class="icon-x" data-prdel="${pc.id}" title="Smazat">×</button>
+        <button class="icon-x" data-prdel="${G[G.length-1].id}" title="${poc>1?"Smazat 1 ks":"Smazat"}">×</button>
       </header>
       ${otevr?`<div style="padding:10px 14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         ${vlastni?`
@@ -4580,6 +4681,14 @@ function renderNast(){
     <td class="r"><input type="number" step="0.1" class="px" value="${x.hodnota}" data-nk="${i}" data-nf="hodnota"></td>
     <td><input type="text" value="${esc(x.pozn||"")}" data-nk="${i}" data-nf="pozn" style="font-size:12px;color:var(--ink-3)"></td>
     <td class="r"><button class="icon-x" data-delnakl="${i}">×</button></td></tr>`).join("");
+  {const opt=(sel,kat)=>'<option value="">— vyber —</option>'+
+     Object.entries(D.komponenty).filter(([c])=>c===kat).flatMap(([c,a])=>a.map(k=>
+       `<option value="${k.id}" ${sel===k.id?"selected":""}>${esc(k.nazev)}</option>`)).join("");
+   $("#wifiBody").innerHTML=(D.wifiDesky||[]).map((x,i)=>`<tr>
+     <td><select data-wf="${i}" data-wk="deska">${opt(x.deska,"Základní deska")}</select></td>
+     <td><select data-wf="${i}" data-wk="wifi">${opt(x.wifi,"Základní deska")}</select></td>
+     <td><select data-wf="${i}" data-wk="modul">${opt(x.modul,"Ostatní")}</select></td>
+     <td class="r"><button class="icon-x" data-delwifi="${i}">×</button></td></tr>`).join("");}
   $("#cVat").value=D.nastaveni.vat; $("#cWork").value=D.nastaveni.prace;
   $("#cWin").value=D.nastaveni.windows; 
 }
@@ -4781,6 +4890,9 @@ document.addEventListener("change",e=>{
   if(t.dataset.pri&&t.dataset.prf){
     const pc=D.pripravene.find(x=>x.id===t.dataset.pri);
     if(pc){
+      /* Karta zastupuje všechny stejné stroje, takže se zápis rozešle celé skupině.
+         Jinak by se skupina při každé úpravě rozpadla na jednotlivé kusy. */
+      const G=prSkupina(pc);
       const f=t.dataset.prf;
       if(f==="sestText"){
         /* Z našeptávače přijde "kód · název". Hledáme podle základního kódu i podle
@@ -4791,18 +4903,19 @@ document.addEventListener("change",e=>{
         const s=D.sestavy.find(x=>(x.kod||"").split(",").map(y=>y.trim()).includes(kod))
           ||D.sestavy.find(x=>(x.kod||"").split(",").some(y=>y.trim().split("/")[0]===zaklad))
           ||D.sestavy.find(x=>psano.endsWith(x.nazev));
-        if(s&&s.id!==pc.sest){pc.sest=s.id;pc.skrin="";pc.priplatky=[]}
+        if(s&&s.id!==pc.sest)for(const x of G){x.sest=s.id;x.skrin="";x.priplatky=[]}
         renderPripravene(); renderSklad(); persist(); return}
-      pc[f]=["cena","nakup"].includes(f)?(t.value===""?null:Number(t.value)):t.value;
-      if(f==="sest"){pc.skrin="";pc.priplatky=[]}   // jiná sestava → jiné skříně i příplatky
+      const v=["cena","nakup"].includes(f)?(t.value===""?null:Number(t.value)):t.value;
+      for(const x of G){x[f]=v; if(f==="sest"){x.skrin="";x.priplatky=[]}}
       renderPripravene(); renderSklad(); persist();
     }
     return}
   if(t.dataset.prp){
     const pc=D.pripravene.find(x=>x.id===t.dataset.prp);
     if(pc){
-      const id=t.dataset.prpid;
-      pc.priplatky=t.checked?[...new Set([...(pc.priplatky||[]),id])]:(pc.priplatky||[]).filter(x=>x!==id);
+      const G=prSkupina(pc), id=t.dataset.prpid;
+      for(const x of G)
+        x.priplatky=t.checked?[...new Set([...(x.priplatky||[]),id])]:(x.priplatky||[]).filter(y=>y!==id);
       renderPripravene(); renderSklad(); persist();
     }
     return}
@@ -4848,6 +4961,10 @@ document.addEventListener("change",e=>{
   if(t.dataset.pid&&t.dataset.pf){const p=D.priplatky.find(x=>x.id===t.dataset.pid);
     if(p){p[t.dataset.pf]=t.value||null;renderSur();persist()}}
   if(t.dataset.nk!==undefined&&t.dataset.nf==="typ"){D.naklady[+t.dataset.nk].typ=t.value;persist()}
+  if(t.dataset.wf!==undefined&&t.dataset.wk){
+    const x=(D.wifiDesky||[])[+t.dataset.wf];
+    if(x){x[t.dataset.wk]=t.value||null; renderPripravene(); renderSklad(); persist()}
+    return}
   if(t.dataset.skz!==undefined){D.skrine.zebricek[t.dataset.skz]=t.checked;renderSest();persist()}
   if(t.dataset.ske!==undefined){D.skrine.extra.skrine[t.dataset.ske]=t.checked;renderSest();persist()}
   if(t.id==="skModul"){D.skrine.extra.modul=t.value||null;renderSest();persist()}
@@ -4895,7 +5012,18 @@ document.addEventListener("click",e=>{
       datum:new Date().toISOString().slice(0,10)};
     if(t.id==="prVlastni"){nc.typ="vlastni";nc.nazev="";nc.slozeni="";nc.nakup=null}
     D.pripravene.push(nc); prOtevrene[nc.id]=true;
-    renderPripravene(); persist(); return}
+    /* Zapnuté hledání by novou kartu schovalo — rozpracovaný stroj nemá co hledat. */
+    prQ=""; {const pole=$("#prHledat"); if(pole)pole.value=""; osvezKrizky()}
+    renderPripravene(); persist();
+    /* Karta je nahoře. Kurzor jde do prvního pole, ať se dá hned psát. */
+    setTimeout(()=>{
+      const karta=document.querySelector(`[data-prcard="${nc.id}"]`);
+      if(karta&&karta.scrollIntoView)karta.scrollIntoView({behavior:"smooth",block:"center"});
+      const pole=document.querySelector(
+        `[data-pri="${nc.id}"][data-prf="${nc.typ==="vlastni"?"nazev":"sestText"}"]`);
+      if(pole)pole.focus();
+    },0);
+    return}
   if(t.dataset.kopmodel){
     const M=modelyTexty(t.dataset.kopmodel);
     const txt=M.join("\n");
@@ -4915,7 +5043,16 @@ document.addEventListener("click",e=>{
     prOtevrene[t.dataset.prbal]=!prOtevrene[t.dataset.prbal];
     renderPripravene(); return}
   if(t.dataset.prdel){
-    D.pripravene=D.pripravene.filter(x=>x.id!==t.dataset.prdel);
+    const pc=(D.pripravene||[]).find(x=>x.id===t.dataset.prdel);
+    if(!pc){renderPripravene();return}
+    const G=prSkupina(pc);
+    const s=pc.typ==="vlastni"?null:D.sestavy.find(x=>x.id===pc.sest);
+    const jm=pc.typ==="vlastni"?(pc.nazev||"Vlastní sestava"):(s?s.nazev:"nevybraná sestava");
+    const skr=pc.skrin?(najdiKomp(pc.skrin)||{}).nazev||"":"";
+    const popis=jm+(skr?" · "+skr:"")+(pc.pozn?" · "+pc.pozn:"");
+    if(!confirm("Opravdu smazat 1 ks?\n\n"+popis+"\n\n"
+      +(G.length>1?"Zůstane "+(G.length-1)+" ks z "+G.length+".":"Je to poslední kus, karta zmizí.")))return;
+    D.pripravene=D.pripravene.filter(x=>x.id!==pc.id);
     renderPripravene(); renderSklad(); persist(); return}
   if(t.id==="addBuild"){
     /* Nová sestava se přidává na konec a filtr ji může schovat — zrušíme filtry,
@@ -5089,6 +5226,8 @@ document.addEventListener("click",e=>{
   if(t.dataset.delp){D.priplatky=D.priplatky.filter(p=>p.id!==t.dataset.delp);renderSur();persist()}
   if(t.id==="addNakl"){D.naklady.push({klic:"",typ:"pevna",hodnota:0,pozn:""});renderNast();persist()}
   if(t.dataset.delnakl){D.naklady.splice(+t.dataset.delnakl,1);renderNast();persist()}
+  if(t.id==="addWifi"){(D.wifiDesky=D.wifiDesky||[]).push({deska:null,wifi:null,modul:null});renderNast();persist()}
+  if(t.dataset.delwifi){D.wifiDesky.splice(+t.dataset.delwifi,1);renderNast();renderPripravene();renderSklad();persist()}
   if(t.id==="addBandP"){D.pasmaPriplatku.push([0,0]);renderNast();persist()}
   if(t.dataset.delbandp){D.pasmaPriplatku.splice(+t.dataset.delbandp,1);renderNast();renderSur();persist()}
   if(t.id==="addBand"){D.pasma.push([0,0]);renderNast();persist()}
