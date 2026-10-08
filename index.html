@@ -556,6 +556,8 @@ tr.unused td{background:#FEFCFB}
       <input type="checkbox" id="skKriticke" style="width:auto"> jen kritické</label>
     <label class="row" style="gap:6px;font-size:13px;cursor:pointer;flex:0 0 auto">
       <input type="checkbox" id="skVse" style="width:auto"> i bez množství</label>
+    <button class="btn btn-sm" id="skRevize" style="margin-left:auto"
+      title="Projít modely u všech komponent a odškrtnout, co už nemáš">Revize modelů</button>
   </div>
   <div id="skBlocks"></div>
 </section>
@@ -1306,7 +1308,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=211;
+const VERZE=214;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2016,11 +2018,11 @@ function cesteHtml(id){
 function modelyTexty(id){
   const k=najdiKomp(id); if(!k)return [];
   /* Dvě dodávky téhož modelu vypíšeme jako jeden řádek se součtem kusů. */
-  const sloucene=new Map();
-  for(const x of modelyZNakupu(id).filter(y=>y.popis))
-    sloucene.set(x.popis,(sloucene.get(x.popis)||0)+(Number(x.ks)||0));
-  const z=[...sloucene].map(([popis,ks])=>(ks>1?ks+"× ":"")+popis);
-  const rucni=(k.modely||"").split("\n").map(x=>x.trim()).filter(Boolean);
+  /* Jen typy — bez počtů a cen. Počty jsou ve sloupci Ks. */
+  const z=[...new Set(modelyZNakupu(id).filter(y=>y.popis).map(y=>y.popis))];
+  /* Skryté modely se nevypisují ani z ruční poznámky — jinak by se vrátily zadními vrátky. */
+  const skr=skryteModely(k);
+  const rucni=(k.modely||"").split("\n").map(x=>cistyModel(x)).filter(x=>x&&!skr.includes(x));
   /* Ruční poznámka často opakuje totéž, co se vyčetlo z nákupů — jen bez počtu
      a ceny. Takové řádky nevypisujeme dvakrát. */
   const klic=t=>String(t).toLowerCase().replace(/^\d+×\s*/,"").replace(/\(.*?\)/g,"")
@@ -2031,7 +2033,10 @@ function modelyTexty(id){
     for(const v of videno)if(v.includes(q)||q.includes(v))return false;
     videno.add(q); return true;})];
 }
-function modelyZNakupu(id){
+/* Modely, u kterých Lukáš řekl, že je už nemá skladem. Odvození z nákupů je jen
+   odhad — tohle je ruční korekce, aby se zákazníkovi nekopíroval dávno prodaný disk. */
+function skryteModely(k){return Array.isArray(k&&k.modelySkryte)?k.modelySkryte:[]}
+function modelyZNakupu(id,ivse){
   const k=najdiKomp(id); if(!k)return [];
   const ks=Number(k.ks)||0; if(!ks)return [];
   const n=(D.nakupy||[]).filter(x=>x.komp===id&&!x.vratka&&(Number(x.dodano)||0)>0)
@@ -2040,30 +2045,91 @@ function modelyZNakupu(id){
   for(const x of n){
     if(zb<=0)break;
     const v=Math.min(Number(x.dodano)||0,zb); zb-=v;
-    let s=(x.popis||"").replace(/^(Grafick[áa] karta|Procesor|Opera[čc]n[íi] pam[ěe][ťt]|Z[áa]kladn[íi] deska|Sk[řr][íi][ňn])\s+/i,"")
-      .replace(/\b(bulk|tray|box|u dodavatele|ROZBALENO)\b/gi,"").replace(/\s{2,}/g," ").trim().replace(/^[,\-]+|[,\-]+$/g,"");
+    /* Stejné čištění jako u ručních poznámek, ať se název z nákupu a z poznámky
+       potkají na stejném tvaru — jinak by skrytý model prošel druhou cestou. */
+    let s=cistyModel(x.popis);
     if(s)out.push({ks:v,popis:s,datum:x.datum||""});
   }
   if(zb>0)out.push({ks:zb,popis:null,datum:""});
-  return out;
+  if(ivse)return out;
+  const skr=skryteModely(k);
+  return out.filter(x=>!x.popis||!skr.includes(x.popis));
 }
 function modelyHtml(id,maly){
   const L=modelyZNakupu(id); const k=najdiKomp(id);
-  const r=L.filter(x=>x.popis).map(x=>`${x.ks}× ${esc(x.popis)}`);
-
-  if(k&&k.modely)r.push(...k.modely.split("\n").filter(Boolean).map(x=>esc(x)));
+  /* Jen typy, bez počtů a cen — ty jsou vidět ve vlastních sloupcích. */
+  const videno=new Set(); const r=[]; const skryte=skryteModely(k);
+  for(const x of L){ if(!x.popis||videno.has(x.popis))continue; videno.add(x.popis); r.push(esc(x.popis)) }
+  if(k&&k.modely)for(const x of k.modely.split("\n").map(y=>cistyModel(y)).filter(y=>y&&!skryte.includes(y))){
+    if(!videno.has(x)){videno.add(x); r.push(esc(x))}
+  }
   if(!r.length)return "";
   return `<div style="font-size:${maly?"10.5":"11"}px;color:var(--ink-3);margin-top:2px;line-height:1.5">${r.join("<br>")}</div>`;
 }
-function chibiRow(x){return x?`<tr><td class="r num" style="color:var(--signal)">${x.ks}×</td><td colspan="2" style="color:var(--signal)">bez záznamu nákupu</td></tr>`:""}
+function chibiRow(x){return x?`<tr><td colspan="2" style="color:var(--signal)">bez záznamu nákupu</td></tr>`:""}
+/* Název modelu bez ceny a bez počtu kusů — používá se při výpisu i při kopírování. */
+function cistyModel(t){
+  /* Pořadí je důležité: nejdřív pryč počet na začátku, teprve pak předpona kategorie —
+     poznámky z přepočtu mají tvar „3× Operační paměť Patriot … (2890 Kč)". */
+  return String(t||"")
+    .replace(/^\s*\d+\s*(?:×|x)\s*/i,"")
+    .replace(/^(Grafick[áa] karta|Procesor|Opera[čc]n[íi] pam[ěe][ťt]|Z[áa]kladn[íi] deska|Sk[řr][íi][ňn]|SSD disk|Zdroj)\s+/i,"")
+    .replace(/\b(bulk|tray|box|u dodavatele|ROZBALENO)\b/gi,"")
+    .replace(/\(\s*[\d\s]+(?:[,.]\d+)?\s*(?:Kč|CZK)\s*\)/gi,"")
+    .replace(/\s{2,}/g," ").trim().replace(/^[,\-]+|[,\-]+$/g,"");
+}
+/* Týdenní úklid: projdeme komponenty, kde se nabízí víc modelů, a odškrtneme ty,
+   které už fyzicky nejsou. Jeden průchod místo klikání po jedné komponentě. */
+function otevriRevizi(){
+  const bloky=[];
+  for(const[kat,arr]of Object.entries(D.komponenty)){
+    for(const k of arr){
+      if(k.neomezene)continue;
+      const L=modelyZNakupu(k.id,true).filter(x=>x.popis);
+      const nazvy=[...new Set(L.map(x=>x.popis))];
+      if(nazvy.length<2)continue;              // jeden model není co revidovat
+      const skr=skryteModely(k);
+      bloky.push(`<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div class="row" style="gap:8px;align-items:baseline">
+          <strong style="font-size:12.5px">${esc(k.nazev)}</strong>
+          <span class="muted" style="font-size:11.5px">${kat} · skladem ${k.ks??"—"} ks</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:5px">
+          ${nazvy.map(n=>`<label class="row" style="gap:6px;font-size:12px;cursor:pointer">
+            <input type="checkbox" data-rev="${esc(k.id)}" data-revm="${esc(n)}"
+              ${skr.includes(n)?"":"checked"} style="width:auto">
+            <span style="${skr.includes(n)?"text-decoration:line-through;opacity:.5":""}">${esc(n)}</span></label>`).join("")}
+        </div></div>`);
+    }
+  }
+  $("#mTitle").textContent="Revize modelů — co opravdu máš skladem";
+  $("#mBody").innerHTML=bloky.length?`
+    <p class="hint" style="margin:0 0 10px">Zaškrtnuté modely se nabízejí v přehledech i v exportu specifikací.
+      Odškrtni, co jsi doprodal. Počty ani ceny se tím nemění.</p>
+    <div style="max-height:62vh;overflow:auto">${bloky.join("")}</div>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn btn-sm" id="revZrus">Zrušit</button>
+      <button class="btn btn-sm btn-primary" id="revOk">Uložit</button></div>`
+    :`<p class="hint">Žádná komponenta nemá víc než jeden model — není co revidovat.</p>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn btn-sm" id="revZrus">Zavřít</button></div>`;
+  modalKomp=null; $("#modal").hidden=false;
+}
 function otevriModely(id){
   const k=najdiKomp(id); if(!k)return;
   $("#mTitle").textContent=k.nazev+" — konkrétní modely";
-  const L=modelyZNakupu(id);
-  const odv=L.filter(x=>x.popis).map(x=>`<tr><td class="r num" style="width:46px">${x.ks}×</td><td>${esc(x.popis)}</td><td class="num muted" style="width:88px">${esc(x.datum)}</td></tr>`).join("");
+  const L=modelyZNakupu(id,true);          // i skryté, ať se dají vrátit
+  const skr=skryteModely(k);
+  const odv=L.filter(x=>x.popis).map(x=>{
+    const pryc=skr.includes(x.popis);
+    return `<tr style="${pryc?"opacity:.45":""}">
+      <td><label class="row" style="gap:7px;cursor:pointer;font-size:12.5px">
+        <input type="checkbox" data-mskr="${esc(x.popis)}" ${pryc?"":"checked"} style="width:auto">
+        <span style="${pryc?"text-decoration:line-through":""}">${esc(x.popis)}</span></label></td>
+      <td class="num muted" style="width:88px">${esc(x.datum)}</td></tr>`}).join("");
   const chybi=L.find(x=>!x.popis);
   $("#mBody").innerHTML=`
-    ${odv?`<p class="hint" style="margin:0 0 6px">Odvozeno z nákupů podle stavu skladu (${Number(k.ks)||0} ks). Aktualizuje se samo.</p>
+    ${odv?`<p class="hint" style="margin:0 0 6px">Odvozeno z nákupů podle stavu skladu (${Number(k.ks)||0} ks).
+      <strong>Odškrtni, co už fyzicky nemáš</strong> — přestane se nabízet i v exportu specifikací.</p>
       <div class="tbl"><table style="margin-bottom:14px"><tbody>${odv}${chibiRow(chybi)}</tbody></table></div>`:
       `<p class="hint" style="margin:0 0 10px">K téhle komponentě nemám v Nákupech žádný záznam, ze kterého by šly modely odvodit.</p>`}
     <p class="hint" style="margin:0 0 10px">Vlastní poznámka navíc — každý řádek zvlášť. Zobrazí se pod odvozeným seznamem.</p>
@@ -3083,7 +3149,7 @@ function rozeberVolnyText(t){
 /* Košík nebo objednávka po řádcích. Název položky stojí na svém řádku, pod ním
    počet kusů a cena — s odkazem i bez něj, protože ze schránky odkazy nepřijdou. */
 /* Krátké stavové řádky uvnitř položky — přeskočí se a nic nerozdělují. */
-const KOSIK_STAV=/^(\+\s*)?(služba|sluzba|rezervováno|rezervovano|skladem|dárek|darek|na cestě|na ceste|k vyzvednutí|k vyzvednuti|expedujeme|dostupné|dostupne)\s*$/i;
+const KOSIK_STAV=/^(\+\s*)?(služba|sluzba|rezervováno|rezervovano|rezervace|skladem|dárek|darek|na cestě|na ceste|k vyzvednutí|k vyzvednuti|expedujeme|dostupné|dostupne|dodáno|dodano|objednáno|objednano|vyfakturováno|vyfakturovano|čeká|ceka)\s*:?(\s+\d+\s*(?:ks|x)?)?\s*$/i;
 /* Řádky o platbě a doručení na konci košíku. */
 const KOSIK_KONEC=/^(přidat zboží|pridat zbozi|bankovním|bankovnim|doručení|doruceni|platba|způsob|zpusob|hotově|hotove|kartou|dobírkou|dobirkou|osobní|osobni)/i;
 const KOSIK_SOUHRN=/^(cena bez dph|celková cena|celkova cena|celkem|mezisou|k úhradě|k uhrade)/i;
@@ -3094,13 +3160,30 @@ function doDataDne(d,m,r){
   if(!r&&dat()<new Date(Date.UTC(dnes.getFullYear(),dnes.getMonth(),dnes.getDate()-14)))rok++;
   return dat().toISOString().slice(0,10);
 }
+/* Smarty píše termín i slovy: "Doručení Zítra", "Doručení Pátek", "Doručení do 3 dnů". */
+const DNY_TYDNE={pondeli:1,utery:2,streda:3,ctvrtek:4,patek:5,sobota:6,nedele:0};
+function doDataSlovy(s){
+  const t=String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()
+    .replace(/^(v|ve|o)\s+/,"").replace(/[()]/g,"").trim();
+  const d=new Date(), dnes=Date.UTC(d.getFullYear(),d.getMonth(),d.getDate());
+  const posun=n=>new Date(dnes+n*86400000).toISOString().slice(0,10);
+  if(/^dnes\b/.test(t))return posun(0);
+  if(/^zitra\b/.test(t))return posun(1);
+  if(/^pozitri\b/.test(t))return posun(2);
+  const mz=t.match(/^(?:za|do)\s+(\d+)\s*(?:pracovni(?:ch)?\s+)?(?:den|dny|dnu|dnech|dnu)\b/);
+  if(mz)return posun(Number(mz[1]));
+  for(const[jm,ci]of Object.entries(DNY_TYDNE)){
+    if(t.startsWith(jm)){ let n=(ci-new Date(dnes).getUTCDay()+7)%7; if(n===0)n=7; return posun(n) }
+  }
+  return null;
+}
 function rozeberRadky(radky){
   const cis=x=>Number(String(x).replace(/[\s\u00a0]/g,"").replace(",","."))||0;
   const meta={zaklad:null,dph:null,celkem:null,poplatky:0,poplatkyPopis:[]};
   const out=[]; let cur=null;
   const uloz=()=>{ if(cur&&cur.popis){
       let cena=cur.jednotkova;
-      if(cena==null){const c=cur.ceny.filter(v=>v!==0);
+      if(cena==null){const c=(cur.ceny.filter(v=>v!==0).length?cur.ceny:(cur.cenyBez||[])).filter(v=>v!==0);
         /* Většina e-shopů uvádí u položky celkovou částku, Mironet cenu za kus. */
         const zaKus=(D.cenaZaKus||[]).includes(String(cur.dodavatel||dodavatelZOdkazu(cur.odkaz)||"").toLowerCase());
         cena=c.length?(cur.ks>1&&!zaKus?Math.round((Math.max(...c.map(Math.abs))/cur.ks)*100)/100*Math.sign(c[0]):c[0]):null}
@@ -3120,13 +3203,23 @@ function rozeberRadky(radky){
     if(mj){ if(cur)cur.jednotkova=cis(mj[1]); continue }
     /* Bez \b na konci — české "č" se v regulárním výrazu nepočítá jako písmeno,
        takže by podmínka na konci řádku nikdy neplatila a cena by se brala jako název. */
-    const mc=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]/i);
-    if(mc){ if(cur)cur.ceny.push(cis(mc[1])); continue }
+    /* Smarty tiskne u položky obě částky: "19 388 Kč" a pod ní "16 023 Kč bez DPH".
+       Kdyby spadly do jednoho pole, vzala by se u víc kusů ta nižší jako celková. */
+    const mc=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc](\s*bez\s*DPH)?/i);
+    if(mc){ if(cur)(mc[2]?cur.cenyBez:cur.ceny).push(cis(mc[1])); continue }
     if(KOSIK_STAV.test(l))continue;
     /* Smarty uvádí u každé položky "Doručení 25.9. (pátek)". Je to údaj k položce,
        ne konec košíku — datum si zapamatujeme a řádek přeskočíme. */
     const mdor=l.match(/^doru[čc]en[ií]\s+(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{4})?/i);
     if(mdor){ if(cur)cur.doruceni=doDataDne(mdor[1],mdor[2],mdor[3]); continue }
+    /* Termín slovy. A pojistka: dokud položka nemá cenu, je "Doručení …" její údaj,
+       ne konec košíku — jinak by se cena pod ním zahodila a položka vypadla. */
+    const mdorS=l.match(/^doru[čc]en[ií]\s*:?\s+(.+)$/i);
+    if(mdorS&&cur){
+      const dd=doDataSlovy(mdorS[1]);
+      if(dd)cur.doruceni=dd;
+      if(dd||(!cur.ceny.length&&!(cur.cenyBez||[]).length&&cur.jednotkova==null))continue;
+    }
     if(KOSIK_KONEC.test(l)){uloz();continue}
     /* zbývá text — název položky, nebo poplatek typu doprava či sleva */
     const md=l.match(/^\[(.+?)\]\((https?:\/\/[^\s)]+)\)/);
@@ -3138,7 +3231,7 @@ function rozeberRadky(radky){
     let ksRadek=null, cenaRadek=null;
     const mks=zbytek.match(/(\d+)\s*(?:ks|x)\b/i); if(mks)ksRadek=Number(mks[1]);
     const mce=zbytek.match(/(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]/i); if(mce)cenaRadek=cis(mce[1]);
-    cur={popis,odkaz:md?md[2]:"",ks:ksRadek||1,ceny:cenaRadek!=null?[cenaRadek]:[],jednotkova:null,doruceni:null,
+    cur={popis,odkaz:md?md[2]:"",ks:ksRadek||1,ceny:cenaRadek!=null?[cenaRadek]:[],cenyBez:[],jednotkova:null,doruceni:null,
       poplatek:NENIZBOZI.test(popis)||/^služba\b|^sluzba\b/i.test(popis)};
   }
   uloz();
@@ -5020,9 +5113,34 @@ document.addEventListener("click",e=>{
   if(t.dataset.delnk){D.nakupy=D.nakupy.filter(x=>x.id!==t.dataset.delnk);renderNakupy();persist()}
   if(t.id==="specZavri"){$("#modal").hidden=true}
   if(t.id==="specKopie"){navigator.clipboard.writeText(specText).then(()=>toast("Zkopírováno"),()=>toast("Kopírování se nezdařilo"))}
+  if(t.id==="skRevize"){otevriRevizi();return}
+  if(t.id==="revZrus"){$("#modal").hidden=true;return}
+  if(t.id==="revOk"){
+    const podle={};
+    for(const inp of document.querySelectorAll("[data-rev]")){
+      const id=inp.dataset.rev; (podle[id]=podle[id]||[]);
+      if(!inp.checked)podle[id].push(inp.dataset.revm);
+    }
+    let zmen=0;
+    for(const[id,pryc]of Object.entries(podle)){
+      const k=najdiKomp(id); if(!k)continue;
+      const puv=skryteModely(k).join("|");
+      k.modelySkryte=pryc;
+      if(puv!==pryc.join("|"))zmen++;
+    }
+    $("#modal").hidden=true; renderKomp(); renderSklad(); persist();
+    toast(zmen?"Upraveno u "+zmen+" komponent":"Beze změny");
+    return}
   if(t.id==="modelyZrus"){$("#modal").hidden=true;modelyId=null}
   if(t.id==="modelyOk"){const k=najdiKomp(modelyId);
-    if(k){k.modely=$("#modelyText").value.replace(/\n{3,}/g,"\n\n").trim()}
+    if(k){
+      k.modely=$("#modelyText").value.replace(/\n{3,}/g,"\n\n").trim();
+      /* Co je odškrtnuté, si uložíme jako „tohle už nemám". */
+      const pryc=[];
+      for(const inp of document.querySelectorAll("[data-mskr]"))
+        if(!inp.checked)pryc.push(inp.dataset.mskr);
+      k.modelySkryte=pryc;
+    }
     $("#modal").hidden=true;modelyId=null;renderKomp();renderSklad();persist();toast("Uloženo")}
   if(t.id==="pdCloud"){nactiProdejeZCloudu();return}
   if(t.id==="pdNacti"){zobrazOdpis()}
