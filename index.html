@@ -1322,7 +1322,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=219;
+const VERZE=220;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -5036,7 +5036,25 @@ document.addEventListener("click",e=>{
   if(t.id==="nkOtev"||t.id==="nkVratky"){renderNakupy()}
   if(t.id==="nkHledat"){nkQ=t.value;renderNakupy()}
   if(t.dataset.akt){const k=najdiKomp(t.dataset.id);if(k){k.akt=t.dataset.akt;renderAll()}}
-  if(t.dataset.del){for(const[c,a]of Object.entries(D.komponenty)){const i=a.findIndex(k=>k.id===t.dataset.del);if(i>=0){a.splice(i,1);break}}renderAll()}
+  if(t.dataset.del){
+    const k=najdiKomp(t.dataset.del); if(!k)return;
+    /* Komponenta visí v sestavách, v příplatcích i v nákupech. Smazáním zůstanou
+       osiřelé odkazy, takže se nejdřív vypíše, čeho se to dotkne. */
+    const vSest=D.sestavy.filter(s=>Object.values(s.vyber||{}).includes(k.id));
+    const vPripl=(D.priplatky||[]).filter(p=>[p.to,p.from,p.chlNa,p.chlOd].includes(k.id));
+    const vNak=(D.nakupy||[]).filter(n=>n.komp===k.id);
+    const kde=[];
+    if(vSest.length)kde.push("· "+vSest.length+"× v sestavě: "
+      +vSest.slice(0,4).map(s=>((s.kod||"").split(",")[0].trim().split("/")[0])||s.nazev).join(", ")
+      +(vSest.length>4?", …":""));
+    if(vPripl.length)kde.push("· "+vPripl.length+"× v příplatku");
+    if(vNak.length)kde.push("· "+vNak.length+"× v nákupech");
+    if(!confirm("Opravdu smazat komponentu?\n\n"+k.nazev
+      +"\nskladem "+(Number(k.ks)||0)+" ks, použitá cena "+kc(cena(k))
+      +(kde.length?"\n\nPoužívá se:\n"+kde.join("\n"):"\n\nNikde se nepoužívá.")
+      +"\n\nVrátit to nejde."))return;
+    for(const[c,a]of Object.entries(D.komponenty)){const i=a.findIndex(x=>x.id===t.dataset.del);if(i>=0){a.splice(i,1);break}}
+    renderAll(); toast("Komponenta smazána")}
   if(t.dataset.addk){D.komponenty[t.dataset.addk].push({id:uid(),nazev:"Nová komponenta",sklad:0,novy:0,akt:"sklad",dod:""});renderAll()}
   if(t.dataset.delcat){if(confirm(`Smazat kategorii ${t.dataset.delcat} i s komponentami?`)){delete D.komponenty[t.dataset.delcat];renderAll()}}
   if(t.id==="sortAll"){serad(D);renderAll();toast("Seřazeno")}
@@ -5294,7 +5312,12 @@ document.addEventListener("click",e=>{
       ks:null,odeslano:false,reseni:"",hotovo:false,uzavreno:null,pozn:""};
     D.reklamace.push(r); rkNovy=r.id; renderRekl(); persist();
     const inp=$(`[data-rk="${r.id}"][data-rf="produkt"]`); if(inp)inp.focus()}
-  if(t.dataset.delrk){D.reklamace=D.reklamace.filter(x=>x.id!==t.dataset.delrk);renderRekl();persist()}
+  if(t.dataset.delrk){
+    const r=D.reklamace.find(x=>x.id===t.dataset.delrk); if(!r)return;
+    if(!confirm("Opravdu smazat reklamaci?\n\n"+(r.produkt||"bez názvu")
+      +"\n"+[r.datum||"",(Number(r.ks)||0)+" ks",r.dodavatel||"",r.reseni||""].filter(Boolean).join(" · ")
+      +"\n\nVrátit to nejde."))return;
+    D.reklamace=D.reklamace.filter(x=>x.id!==t.dataset.delrk);renderRekl();persist()}
   if(t.id==="rkCsv"){
     const rows=[["datum","produkt","dodavatel","ks","odesláno","řešení","uzavřeno","stav","poznámka"]];
     for(const r of D.reklamace)rows.push([r.datum||"",r.produkt||"",r.dodavatel||"",r.ks??"",
@@ -5305,7 +5328,17 @@ document.addEventListener("click",e=>{
     vyber:true,zaskl:0,zaplaceno:false,vratka:null};   // nový řádek je vždy nejdřív kandidát
     D.nakupy.push(n); nkNovy=n.id; renderNakupy();persist();
     const inp=$(`[data-nn="${n.id}"][data-nf="kompText"]`); if(inp)inp.focus()}
-  if(t.dataset.delnk){D.nakupy=D.nakupy.filter(x=>x.id!==t.dataset.delnk);renderNakupy();persist()}
+  if(t.dataset.delnk){
+    const n=D.nakupy.find(x=>x.id===t.dataset.delnk); if(!n)return;
+    const k=n.komp?najdiKomp(n.komp):null;
+    const zask=Number(n.zaskl)||0;
+    if(!confirm("Opravdu smazat nákup?\n\n"+(n.popis||(k&&k.nazev)||"bez popisu")
+      +"\n"+[n.datum||"",(Number(n.ks)||0)+" ks",kc(Number(n.cena)||0),n.dodavatel||""].filter(Boolean).join(" · ")
+      /* Naskladněné kusy zůstanou ve skladu, ale vážený průměr o nich přestane vědět —
+         tím se rozejde skladová cena i historie k datu prodeje. */
+      +(zask?"\n\nPOZOR: "+zask+" ks už je naskladněno. Ze skladu se neodeberou, ale přepočet cen o tomhle nákupu přestane vědět.":"")
+      +"\n\nVrátit to nejde."))return;
+    D.nakupy=D.nakupy.filter(x=>x.id!==t.dataset.delnk);renderNakupy();persist()}
   if(t.id==="specZavri"){$("#modal").hidden=true}
   if(t.id==="specKopie"){navigator.clipboard.writeText(specText).then(()=>toast("Zkopírováno"),()=>toast("Kopírování se nezdařilo"))}
   if(t.id==="skRevize"){otevriRevizi();return}
