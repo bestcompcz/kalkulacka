@@ -1322,7 +1322,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=218;
+const VERZE=219;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3498,6 +3498,9 @@ function analyzaVse(){
   for(const x of nask){zaloha.push(["ks",x.k,x.k.ks]);x.k.ks=ksPo[x.k.id]}
   for(const z of ceny){zaloha.push(["sklad",z.k,z.k.sklad]);z.k.sklad=z.prum}
   const po=snapCeny(), poP=snapPriplatky();
+  /* Sestavy rozešlé s e-shopem se musí spočítat ještě s aplikovanými cenami — je to
+     tentýž seznam, který pak vsePotvrd pošle do doplňkového CSV. */
+  const rozesle=zmenyCen();
   for(let i=zaloha.length-1;i>=0;i--){const[f,k,v]=zaloha[i];k[f]=v}
   /* které příplatky změnily cenu a u kolika sestav se nabízejí */
   const pripl=[];
@@ -3555,7 +3558,21 @@ function analyzaVse(){
   }
   drzeneRozdily.sort((a,b)=>Math.abs(b.rozdil)-Math.abs(a.rozdil));
   sest.sort((a,b)=>COLL.compare(a.s.nazev,b.s.nazev));
-  return{nask,ceny,sest,pripl,drzeneRozdily,nula:[]};
+  /* Co je v sekci 3, do doplňku nejde. Co zbude, jsou sestavy, jejichž cena se
+     s e-shopem rozešla jinak než naskladněním — typicky po změně reprodukční ceny,
+     po puštění držení nebo po ruční ceně. Jinak by se stáhly, aniž by je okno
+     ukázalo. */
+  const vSekci3=new Set();
+  for(const g of sest)for(const rd of g.radky)vSekci3.add(rd.kod);
+  const doplnek=[];
+  for(const x of rozesle){
+    const kodyMimo=x.kody.filter(k=>!vSekci3.has(k));
+    if(!kodyMimo.length)continue;
+    doplnek.push({s:x.s,kodyMimo,stara:x.stara,nova:x.nova,vypocet:x.vypocet,
+      drzena:x.drzena,jenLevel:x.jenLevel});
+  }
+  doplnek.sort((a,b)=>Math.abs(b.nova-(b.stara??b.nova))-Math.abs(a.nova-(a.stara??a.nova)));
+  return{nask,ceny,sest,pripl,drzeneRozdily,doplnek,nula:[]};
 }
 function zobrazVse(){
   const A=analyzaVse();
@@ -3570,7 +3587,8 @@ function zobrazVse(){
         <button class="btn btn-sm btn-primary" id="vseZrus">Zavřít</button></div>`;
     modalKomp=null; $("#modal").hidden=false; return;
   }
-  if(!A.nask.length&&!A.ceny.length&&!A.sest.length&&!A.pripl.length){toast("Není co naskladnit ani přepočítat");return}
+  if(!A.nask.length&&!A.ceny.length&&!A.sest.length&&!A.pripl.length
+     &&!(A.doplnek||[]).length){toast("Není co naskladnit ani přepočítat");return}
   vseCache=A;
   const sipka=(a,b)=>`${kc(a)} → <strong>${kc(b)}</strong> <span style="color:${b>a?"var(--bad)":"var(--ok)"}">${b>a?"+":""}${Math.round(b-a)}</span>`;
   $("#mTitle").textContent="Naskladnění a přepočet cen";
@@ -3627,6 +3645,22 @@ function zobrazVse(){
         <td style="font-size:11px;color:var(--ink-2)">${g.duvod.map(esc).join("<br>")||"—"}</td></tr>`).join("")}
       </tbody></table></div>`:""}
   </div>
+  ${(A.doplnek||[]).length?`<div style="margin-top:16px">
+    <h3 style="margin:0 0 6px;font-size:13px">3b · Rozešlo se s e-shopem jinak než naskladněním — ${A.doplnek.length}</h3>
+    <p class="hint" style="margin:0 0 8px">Těmhle sestavám naskladnění cenu nezměnilo, ale s e-shopem nesedí — třeba protože jsi u komponenty zvedl reprodukční cenu. Tlačítko <strong>Potvrdit a stáhnout vše pro Shoptet</strong> je pošle do souboru <strong>shoptet-ceny-doplnek</strong>. Tlačítko jen pro ceny je vynechá.</p>
+    <div class="tbl"><table><thead><tr><th>Sestava</th><th class="r" style="width:92px">E-shop</th>
+      <th class="r" style="width:92px">Nově</th><th class="r" style="width:72px">Rozdíl</th>
+      <th class="r" style="width:58px">Variant</th><th>Které</th></tr></thead><tbody>
+      ${A.doplnek.map(x=>`<tr${x.jenLevel?' style="background:#FFFBF5"':''}>
+        <td><strong>${esc(((x.s.kod||"").split(",")[0].trim().split("/")[0])||"—")}</strong>&nbsp; ${esc(x.s.nazev)}
+          ${x.drzena?`<div style="font-size:11px;color:var(--signal)">držená cena</div>`:""}
+          ${x.jenLevel?`<div style="font-size:11px;color:var(--bad);font-weight:600">cena sedí, mění se jen cenový level — kategorie posílej zvlášť</div>`:""}</td>
+        <td class="r num">${x.stara!=null?kc(x.stara):"—"}</td>
+        <td class="r num" style="font-weight:600">${kc(x.nova)}</td>
+        <td class="r num" style="color:${x.stara==null?"var(--ink-3)":(x.nova>x.stara?"var(--bad)":"var(--ok)")}">${x.stara==null?"—":(x.nova>x.stara?"+":"")+Math.round(x.nova-x.stara)}</td>
+        <td class="r num">${x.kodyMimo.length}</td>
+        <td style="font-size:11px;color:var(--ink-2)">${esc(x.kodyMimo.join(", "))}</td></tr>`).join("")}
+      </tbody></table></div></div>`:""}
   <div style="margin-top:16px">
     <h3 style="margin:0 0 6px;font-size:13px">4 · Ceny příplatků${A.pripl.length?" — "+A.pripl.length+" se mění":" — beze změny"}</h3>
     ${A.pripl.length?`<p class="hint" style="margin:0 0 8px;color:var(--bad);font-weight:600">
