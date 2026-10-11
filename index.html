@@ -443,6 +443,23 @@ tr.unused td{background:#FEFCFB}
     </details>
     <div id="vyVystup" style="padding:0 12px 12px"></div>
   </div>
+
+  <div class="card block" style="margin-top:18px">
+    <header><span class="rail" style="--k:var(--misc)"></span><h3>Historie období</h3></header>
+    <p class="hint" style="padding:8px 12px 0;margin:0">Co uložíš tlačítkem <strong>Uložit do historie</strong>, zůstává tady. Jde to i zpětně: nastav staré datumy, dej <em>Z archivu a spočítat</em>, vlož reklamu a ulož. Reklama je jediné číslo, které v archivu není — bez uložení o ní nemáš záznam.</p>
+    <div class="row" style="gap:8px;padding:10px 12px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12.5px;font-weight:600">Sečíst</span>
+      <select id="hiRezim" style="max-width:160px;font-size:12.5px">
+        <option value="obdobi">po uložených obdobích</option>
+        <option value="mesic">po měsících</option>
+        <option value="kvartal">po kvartálech</option>
+        <option value="rok">po letech</option>
+      </select>
+      <button class="btn btn-sm" id="hiCsv" title="Stáhne historii jako CSV">↓ CSV</button>
+      <span class="muted" style="font-size:12px" id="hiStav"></span>
+    </div>
+    <div id="hiVystup" style="padding:0 12px 12px"></div>
+  </div>
 </section>
 
 <!-- ============ ESSOX ============ -->
@@ -642,8 +659,8 @@ tr.unused td{background:#FEFCFB}
         </div>
         <div id="cenikStav" style="margin-top:8px"></div>
       </div>
-      <p class="hint" style="margin:10px 0 0">Token zůstává jen v tomhle prohlížeči, do dat se neukládá —
-        na každém zařízení ho zadáš jednou. Repozitář a soubor se synchronizují spolu s daty.<br>
+      <p class="hint" style="margin:10px 0 0">Token <strong>a heslo k ceníku</strong> zůstávají jen v tomhle prohlížeči, do dat ani do zálohy JSON se neukládají —
+        na každém zařízení je zadáš jednou. Repozitář a soubor se synchronizují spolu s daty.<br>
         <strong>Před prací dej Načíst, po práci Uložit.</strong> Když mezitím uložilo jiné zařízení,
         GitHub zápis odmítne a nic se nepřepíše.</p>
     </div>
@@ -856,6 +873,12 @@ function initSkrine(d){
   return d;}
 function oprav(d){
   if(!d||!d.komponenty)return d;
+  /* Heslo ze starých dat přesunout do prohlížeče a z dat vymazat. Přepsat
+     se nesmí — na tomhle zařízení už může být zadané ruční. */
+  if(d.cloud&&d.cloud.cenikHeslo){
+    if(!cenikHeslo())cenikHesloNastav(String(d.cloud.cenikHeslo));
+    delete d.cloud.cenikHeslo;
+  }
   for(const arr of Object.values(d.komponenty))for(const k of arr){
     k.sklad=Number(k.sklad)||0;
     if(typeof k.novy!=="number"||!isFinite(k.novy)){ if(!k.dod&&typeof k.novy==="string")k.dod=k.novy; k.novy=k.sklad; }
@@ -1348,7 +1371,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=227;
+const VERZE=229;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1377,6 +1400,13 @@ const ghToken=()=>{try{return localStorage.getItem(GH_TOKEN_KEY)||""}catch(e){re
 const zarizeni=()=>{try{return localStorage.getItem(ZARIZENI_KEY)||"neznámé zařízení"}catch(e){return "neznámé"}};
 const zarizeniNastav=v=>{try{v?localStorage.setItem(ZARIZENI_KEY,v):localStorage.removeItem(ZARIZENI_KEY)}catch(e){}};
 const ghNastav=t=>{try{t?localStorage.setItem(GH_TOKEN_KEY,t):localStorage.removeItem(GH_TOKEN_KEY)}catch(e){}};
+/* Heslo k šifrování ceníku drží prohlížeč zvlášť, stejně jako token — do dat
+   nepatří. Do v228 bylo v D.cloud, takže leželo v záloze JSON i v data.json.
+   Zašifrovaný ceník je přitom na veřejné adrese, takže jedna uniklá záloha
+   znamenala rozšifrovatelné nákupní ceny. Na zařízení se zadá jednou. */
+const CENIK_HESLO_KEY="bestcomp-cenik-heslo";
+const cenikHeslo=()=>{try{return localStorage.getItem(CENIK_HESLO_KEY)||""}catch(e){return ""}};
+const cenikHesloNastav=t=>{try{t?localStorage.setItem(CENIK_HESLO_KEY,t):localStorage.removeItem(CENIK_HESLO_KEY)}catch(e){}};
 const cloudOk=()=>!!(D.cloud&&D.cloud.repo&&ghToken());
 /* base64 pro text s diakritikou — btoa samo o sobě na češtinu nestačí */
 function doBase64(txt){
@@ -1665,9 +1695,13 @@ async function publikujCenik(tiche){
   /* 2 · zašifrovaný na veřejnou adresu. Soubor je čitelný komukoli, ale bez hesla
      je to nesmysl — a heslo zná jen kalkulačka a projekt, kde se nacenňuje. */
   const c2=D.cloud||{};
-  if(!c2.cenikRepo||!c2.cenikHeslo)return;
+  const heslo=cenikHeslo();
+  if(!c2.cenikRepo)return;
+  /* Bez hesla se zašifrovaný ceník publikovat nedá. Dřív se to tiše přeskočilo;
+     teď heslo žije v prohlížeči, takže na novém zařízení chybí a musí to být vidět. */
+  if(!heslo){ if(!tiche)toast("Heslo k šifrování ceníku není v tomhle prohlížeči zadané — doplň ho v Nastavení"); return }
   try{
-    const sifra=await zasifruj(txt,c2.cenikHeslo);
+    const sifra=await zasifruj(txt,heslo);
     /* Přípona .json je důležitá — soubor s .enc servíruje GitHub jako binární data
        a text z něj pak nejde přečíst. */
     const url=`https://api.github.com/repos/${c2.cenikRepo}/contents/cenik-sifrovany.json`;
@@ -1830,11 +1864,14 @@ function renderCloud(){
   if(tk&&document.activeElement!==tk)tk.value=ghToken();
   const au=$("#cloudAuto"); if(au)au.checked=autoZap();
   const cr=$("#cenikRepo"); if(cr&&document.activeElement!==cr)cr.value=(D.cloud||{}).cenikRepo||"";
-  const ch=$("#cenikHeslo"); if(ch&&document.activeElement!==ch)ch.value=(D.cloud||{}).cenikHeslo||"";
+  const ch=$("#cenikHeslo"); if(ch&&document.activeElement!==ch)ch.value=cenikHeslo();
   const cs=$("#cenikStav");
   if(cs){
     const kdy=(D.cloud||{}).cenikKdy;
-    cs.innerHTML=`<span class="muted" style="font-size:11.5px">${kdy
+    const chybiHeslo=(D.cloud||{}).cenikRepo&&!cenikHeslo();
+    cs.innerHTML=(chybiHeslo?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:7px 10px;margin-bottom:6px;font-size:12px">
+      <strong>Heslo v tomhle prohlížeči chybí</strong>, takže se zašifrovaný ceník nepublikuje. Zadej ho — do dat ani do zálohy se nezapisuje.</div>`:"")
+      +`<span class="muted" style="font-size:11.5px">${kdy
       ?"Ceník naposledy publikován "+new Date(kdy).toLocaleString("cs-CZ")
       :"Ceník se publikuje spolu s daty. Adresa zatím není vyplněná."}</span>`;
   }
@@ -3933,13 +3970,193 @@ function ulozTyden(){
     obrat:Math.round(vyCache.obrat),trzba:Math.round(vyCache.trzbaBez),
     nakup:Math.round(vyCache.nak/VAT()),marze:Math.round(vyCache.cista),
     reklama:Math.round(vyCache.rekCena),marzePoReklame:Math.round(vyCache.poRek),
+    /* Rozpad nákladů a verze výpočtu — ať je za rok poznat, čím se co počítalo.
+       Metoda historických cen se v v225 měnila, takže je to podstatná informace. */
+    slevy:Math.round(vyCache.sl||0),doprava:Math.round((vyCache.dopr||0)/VAT()),
+    platby:Math.round((vyCache.plat||0)/VAT()),
+    verze:VERZE,kdy:new Date().toISOString(),
     kanaly:vyCache.kanaly.map(x=>({nazev:x.nazev,cena:Math.round(x.cena),konverze:x.konverze}))};
   if(!z.od||!z.do){toast("Vyplň od i do, jinak nevím, co ukládám");return}
   D.tydny=(D.tydny||[]).filter(x=>!(x.od===z.od&&x.do===z.do));
   D.tydny.push(z);
   D.tydny.sort((a,b)=>String(a.od).localeCompare(String(b.od)));
-  persist(); renderVyhodnoceni();
+  persist(); renderVyhodnoceni(); renderHistorie();
   toast("Období uloženo — v historii je "+D.tydny.length);
+}
+/* ======== historie období ========
+   Uložené záznamy se sčítají do měsíců, kvartálů a let. Součet dělá klíč
+   z data OD, takže týden přes přelom měsíce spadne do měsíce, ve kterém
+   začal — proto se u sečtených řádků píše, z kolika období vznikly.
+
+   Pokrytí se hlídá zvlášť. Chybějící týden by součet za rok tiše snížil
+   a nikdo by si toho nevšiml, proto se mezery vypisují. */
+const HI_SOUCTY=["obj","pc","obrat","trzba","nakup","marze","reklama","marzePoReklame","slevy","doprava","platby"];
+function hiKlic(od,rezim){
+  const m=String(od||"").match(/^(\d{4})-(\d{2})/); if(!m)return String(od||"?");
+  if(rezim==="rok")return m[1];
+  if(rezim==="kvartal")return m[1]+"|Q"+(Math.floor((+m[2]-1)/3)+1);
+  return m[1]+"|"+m[2];
+}
+const HI_MESICE=["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+function hiPopis(klic,rezim){
+  if(rezim==="rok")return klic;
+  const[r,c]=String(klic).split("|");
+  if(rezim==="kvartal")return c+" "+r;
+  return (HI_MESICE[+c-1]||c)+" "+r;
+}
+function hiSkupiny(T,rezim){
+  if(rezim==="obdobi")return T.map((x,i)=>({popis:czDatum(x.od)+" – "+czDatum(x.do),pocet:1,
+    od:x.od,do:x.do,index:i,verze:x.verze,...x}));
+  const m=new Map();
+  for(const x of T){
+    const k=hiKlic(x.od,rezim);
+    let g=m.get(k);
+    if(!g){g={popis:hiPopis(k,rezim),pocet:0,od:x.od,do:x.do};for(const f of HI_SOUCTY)g[f]=0;m.set(k,g)}
+    g.pocet++;
+    if(String(x.od)<String(g.od))g.od=x.od;
+    if(String(x.do)>String(g.do))g.do=x.do;
+    for(const f of HI_SOUCTY)g[f]+=Number(x[f])||0;
+  }
+  return [...m.entries()].sort((a,b)=>String(a[0]).localeCompare(String(b[0]))).map(x=>x[1]);
+}
+/* Mezery a přesahy mezi uloženými obdobími. */
+function hiPokryti(T){
+  const den=x=>Math.round(Date.parse(String(x)+"T00:00:00Z")/86400000);
+  const zpet=n=>new Date(n*86400000).toISOString().slice(0,10);
+  const iv=T.filter(x=>x.od&&x.do).map(x=>[den(x.od),den(x.do)]).filter(x=>isFinite(x[0])&&isFinite(x[1])&&x[1]>=x[0]).sort((a,b)=>a[0]-b[0]);
+  if(!iv.length)return {dni:0,mezery:[],prekryvy:[]};
+  const mezery=[],prekryvy=[],slito=[[...iv[0]]];
+  for(let i=1;i<iv.length;i++){
+    const p=slito[slito.length-1];
+    if(iv[i][0]<=p[1]){prekryvy.push([zpet(iv[i][0]),zpet(Math.min(iv[i][1],p[1]))]); p[1]=Math.max(p[1],iv[i][1])}
+    else if(iv[i][0]===p[1]+1)p[1]=iv[i][1];
+    else {mezery.push([zpet(p[1]+1),zpet(iv[i][0]-1)]); slito.push([...iv[i]])}
+  }
+  return {dni:slito.reduce((a,x)=>a+x[1]-x[0]+1,0),mezery,prekryvy,
+    od:zpet(iv[0][0]),do:zpet(Math.max(...iv.map(x=>x[1])))};
+}
+/* Sloupcový graf marže a marže po reklamě. Popisky se ředí, aby se při
+   padesáti obdobích nekreslily přes sebe. */
+function grafHistorie(G){
+  if(G.length<2)return "";
+  const W=Math.max(560,Math.min(1100,80+G.length*22)),H=200,PL=52,PR=12,PT=16,PB=36;
+  const max=Math.max(...G.flatMap(x=>[x.marze,x.marzePoReklame]),1);
+  const krok=(W-PL-PR)/G.length;
+  const bw=Math.max(2,Math.min(22,krok/2.4));
+  const y0=H-PB, sc=v=>(y0-PT)*v/max;
+  const kazdy=Math.max(1,Math.ceil(34/krok));
+  const tik=[0,.5,1].map(f=>f*max);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-width:${W}px" role="img"
+    aria-label="Vývoj čisté marže po obdobích">
+    ${tik.map(t=>`<line x1="${PL}" y1="${(y0-sc(t)).toFixed(1)}" x2="${W-PR}" y2="${(y0-sc(t)).toFixed(1)}"
+      stroke="var(--line)" stroke-width="1"/>
+      <text x="${PL-6}" y="${(y0-sc(t)+3.5).toFixed(1)}" text-anchor="end" font-size="9.5"
+      fill="var(--ink-3)">${t>=1000?Math.round(t/1000)+"k":Math.round(t)}</text>`).join("")}
+    ${G.map((x,i)=>{const xc=PL+krok*i+krok/2;
+      const a=sc(Math.max(0,x.marze)), b=sc(Math.max(0,x.marzePoReklame));
+      return `<g><title>${esc(x.popis)}: marže ${kc(x.marze)}, po reklamě ${kc(x.marzePoReklame)}, ${x.pc} PC</title>
+        <path d="${barV(xc-bw-1,y0-a,bw,a,4)}" fill="#1F8A5B"/>
+        <path d="${barV(xc+1,y0-b,bw,b,4)}" fill="#2E5FBF"/>
+        ${i%kazdy?"":`<text x="${xc}" y="${H-20}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)">${esc(hiKratce(x.popis))}</text>`}
+      </g>`}).join("")}
+    <line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--line-2)" stroke-width="1"/>
+  </svg>
+  <div class="row" style="gap:14px;font-size:11.5px;color:var(--ink-2);margin-top:2px">
+    <span class="row" style="gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#1F8A5B"></span>čistá marže</span>
+    <span class="row" style="gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#2E5FBF"></span>po reklamě</span>
+  </div>`;
+}
+/* Popisek pod osou musí být krátký: „28. 9. – 4. 10. 2026" se nevejde. */
+function hiKratce(p){
+  const s=String(p);
+  const d=s.match(/^(\d+\.\s*\d+\.)/);            // období → začátek rozsahu
+  if(d)return d[1].replace(/\s+/g,"");
+  const m=s.match(/^(\S+)\s+(\d{4})$/);             // měsíc/kvartál → zkratka + rok
+  if(m)return m[1].slice(0,3)+" "+m[2].slice(2);
+  return s;
+}
+function renderHistorie(){
+  const el=$("#hiVystup"), stav=$("#hiStav"); if(!el)return;
+  const T=(D.tydny||[]).slice().sort((a,b)=>String(a.od).localeCompare(String(b.od)));
+  if(!T.length){
+    stav.textContent="";
+    el.innerHTML=`<p class="hint" style="margin:0">Nic uloženého. Spočítej období výš a dej <strong>Uložit do historie</strong>.</p>`;
+    return}
+  const rezim=($("#hiRezim")||{}).value||"obdobi";
+  const G=hiSkupiny(T,rezim);
+  const P=hiPokryti(T);
+  const S=f=>T.reduce((a,x)=>a+(Number(x[f])||0),0);
+  const sum={obj:S("obj"),pc:S("pc"),obrat:S("obrat"),trzba:S("trzba"),nakup:S("nakup"),
+    marze:S("marze"),reklama:S("reklama"),po:S("marzePoReklame")};
+  const pct=(a,b)=>b?(100*a/b).toFixed(1)+" %":"—";
+  stav.textContent=T.length+(T.length===1?" uložené období":T.length<5?" uložená období":" uložených období")
+    +" · "+czDatum(P.od)+" – "+czDatum(P.do)+" · "+P.dni+" dní";
+  const bunky=x=>`<td class="r num">${x.obj||"—"}</td><td class="r num">${x.pc||"—"}</td>
+    <td class="r num">${kc(x.obrat)}</td><td class="r num">${kc(x.trzba)}</td>
+    <td class="r num">-${kc(x.nakup)}</td>
+    <td class="r num"><strong>${kc(x.marze)}</strong><div class="muted" style="font-size:10.5px">${pct(x.marze,x.trzba)}</div></td>
+    <td class="r num">${x.reklama?"-"+kc(x.reklama):"—"}</td>
+    <td class="r num"><strong style="color:${x.marzePoReklame<0?"var(--bad)":"var(--ok)"}">${kc(x.marzePoReklame)}</strong>
+      <div class="muted" style="font-size:10.5px">${pct(x.marzePoReklame,x.trzba)}</div></td>
+    <td class="r num">${x.pc?kc(x.marzePoReklame/x.pc):"—"}</td>`;
+  el.innerHTML=`
+    ${P.mezery.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
+      <strong>${P.mezery.length===1?"V historii je mezera":"V historii jsou mezery"}.</strong>
+      Součty za měsíc a rok jsou o ně nižší, než jaká byla skutečnost:
+      ${P.mezery.map(m=>`<br>${esc(czDatum(m[0]))} – ${esc(czDatum(m[1]))}`).join("")}
+    </div>`:""}
+    ${P.prekryvy.length?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
+      <strong>Některá období se překrývají</strong> — ty dny se v součtech počítají dvakrát:
+      ${P.prekryvy.map(m=>`<br>${esc(czDatum(m[0]))} – ${esc(czDatum(m[1]))}`).join("")}
+    </div>`:""}
+    <div class="row" style="gap:26px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+      <div><div class="muted" style="font-size:11.5px">Obrat s DPH celkem</div><div class="price" style="font-size:20px">${kc(sum.obrat)}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Prodaných PC</div><div class="price" style="font-size:20px">${sum.pc}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Čistá marže</div>
+        <div class="price" style="font-size:20px;color:${sum.marze<0?"var(--bad)":"var(--ok)"}">${kc(sum.marze)}</div>
+        <div class="muted" style="font-size:11.5px">${pct(sum.marze,sum.trzba)} z tržby bez DPH</div></div>
+      <div><div class="muted" style="font-size:11.5px">Po reklamě</div>
+        <div class="price" style="font-size:20px;color:${sum.po<0?"var(--bad)":"var(--ok)"}">${kc(sum.po)}</div>
+        <div class="muted" style="font-size:11.5px">${pct(sum.po,sum.trzba)} · reklama ${kc(sum.reklama)}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Marže na PC po reklamě</div>
+        <div class="price" style="font-size:20px">${sum.pc?kc(sum.po/sum.pc):"—"}</div></div>
+    </div>
+    ${grafHistorie(G)}
+    <div class="tbl" style="margin-top:10px"><table><thead><tr>
+      <th>${rezim==="obdobi"?"Období":"Součet"}</th><th class="r" style="width:46px">Obj.</th>
+      <th class="r" style="width:40px">PC</th><th class="r" style="width:96px">Obrat</th>
+      <th class="r" style="width:96px">Tržba bez DPH</th><th class="r" style="width:96px">Nákup</th>
+      <th class="r" style="width:92px">Čistá marže</th><th class="r" style="width:84px">Reklama</th>
+      <th class="r" style="width:92px">Po reklamě</th><th class="r" style="width:76px">Na PC</th>
+      ${rezim==="obdobi"?`<th style="width:28px"></th>`:""}</tr></thead><tbody>
+      ${G.map(x=>`<tr><td>${esc(x.popis)}
+        <div class="muted" style="font-size:10.5px">${rezim==="obdobi"
+          ? (x.verze?"spočteno ve v"+esc(String(x.verze)):"starší záznam")
+          : x.pocet+(x.pocet===1?" období":x.pocet<5?" období":" období")+" · "+esc(czDatum(x.od))+" – "+esc(czDatum(x.do))}</div></td>
+        ${bunky(x)}
+        ${rezim==="obdobi"?`<td class="r"><button class="x" data-delhi="${esc(x.od)}|${esc(x.do)}" title="Smazat z historie">×</button></td>`:""}</tr>`).join("")}
+      <tr style="border-top:2px solid var(--line-2)"><td><strong>Celkem</strong></td>
+        <td class="r num"><strong>${sum.obj}</strong></td><td class="r num"><strong>${sum.pc}</strong></td>
+        <td class="r num"><strong>${kc(sum.obrat)}</strong></td><td class="r num"><strong>${kc(sum.trzba)}</strong></td>
+        <td class="r num"><strong>-${kc(sum.nakup)}</strong></td>
+        <td class="r num"><strong>${kc(sum.marze)}</strong><div class="muted" style="font-size:10.5px">${pct(sum.marze,sum.trzba)}</div></td>
+        <td class="r num"><strong>${sum.reklama?"-"+kc(sum.reklama):"—"}</strong></td>
+        <td class="r num"><strong>${kc(sum.po)}</strong><div class="muted" style="font-size:10.5px">${pct(sum.po,sum.trzba)}</div></td>
+        <td class="r num"><strong>${sum.pc?kc(sum.po/sum.pc):"—"}</strong></td>
+        ${rezim==="obdobi"?"<td></td>":""}</tr>
+    </tbody></table></div>`;
+}
+function hiCsv(){
+  const T=(D.tydny||[]).slice().sort((a,b)=>String(a.od).localeCompare(String(b.od)));
+  if(!T.length){toast("Historie je prázdná");return}
+  const hl=["od","do","objednávek","prodaných PC","obrat s DPH","tržba bez DPH","nákup bez DPH",
+    "slevy","doprava","poplatky za platbu","čistá marže","reklama","marže po reklamě","verze","uloženo"];
+  const r=T.map(x=>[x.od,x.do,x.obj,x.pc,x.obrat,x.trzba,x.nakup,x.slevy??"",x.doprava??"",x.platby??"",
+    x.marze,x.reklama,x.marzePoReklame,x.verze??"",x.kdy?String(x.kdy).slice(0,10):""]);
+  /* Stejný helper jako ostatní exporty: středník a BOM, ať to Excel
+     otevře ve sloupcích. Vlastní „const csv" by stínil globální csv(). */
+  dl("bestcomp-historie-"+dnes()+".csv",csv([hl,...r]),"text/csv");
+  toast("Historie stažena — "+T.length+" období");
 }
 /* Pondělí až neděle týdne o `kolik` zpátky: 1 = minulý, 2 = předminulý.
    Datum se skládá z místních složek, ne přes toISOString — ten bere UTC
@@ -5290,7 +5507,7 @@ function osvezKrizky(){
     if(inp)w.classList.toggle("ma",!!inp.value);
   }
 }
-function renderAll(){osvezKrizky();renderPripravene();renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderEssox();renderSklad();renderNast();renderOdpisStav();renderCloud();popisTydnu();persist()}
+function renderAll(){osvezKrizky();renderPripravene();renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderEssox();renderSklad();renderNast();renderOdpisStav();renderCloud();popisTydnu();renderHistorie();persist()}
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),1900)}
 
@@ -5340,7 +5557,8 @@ document.addEventListener("input",e=>{
   if(t.id==="cloudToken"){ghNastav(t.value.trim());renderCloud();return}
   if(t.id==="cloudZarizeni"){zarizeniNastav(t.value.trim());renderCloud();return}
   if(t.id==="cenikRepo"){D.cloud.cenikRepo=t.value.trim();persist();return}
-  if(t.id==="cenikHeslo"){D.cloud.cenikHeslo=t.value.trim();persist();return}
+  /* Do dat se nezapisuje, takže ani persist() — heslo patří jen tomuhle prohlížeči. */
+  if(t.id==="cenikHeslo"){cenikHesloNastav(t.value.trim());renderCloud();return}
   if(t.id==="rkHledat"){rkQ=t.value;renderRekl();return}
   if(t.dataset.fi!==undefined&&t.dataset.ff&&fakturaCache){
     const x=fakturaCache.pol[Number(t.dataset.fi)];
@@ -5468,6 +5686,7 @@ document.addEventListener("wheel",e=>{
 },{passive:true});
 document.addEventListener("change",e=>{
   const t=e.target;
+  if(t.id==="hiRezim"){renderHistorie();return}
   if(t.dataset.sp&&t.dataset.pp){const s=D.sestavy.find(x=>x.id===t.dataset.sp);
     if(s){if(t.checked)delete s.vyp[t.dataset.pp];else s.vyp[t.dataset.pp]=true;renderSest();persist()}}
   if(t.dataset.slot){const s=D.sestavy.find(s=>s.id===t.dataset.sid);if(s){s.vyber[t.dataset.slot]=t.value;renderSest();renderKomp();persist()}}
@@ -5697,6 +5916,16 @@ document.addEventListener("click",e=>{
   if(t.id==="vyMinuly"||t.id==="vyPredminuly"){
     vyCsv=null;vyMinulyTyden(t.id==="vyPredminuly"?2:1);renderVyhodnoceni();return}
   if(t.id==="vyArchiv"){vyhodnotZArchivu();return}
+  if(t.id==="hiCsv"){hiCsv();return}
+  if(t.dataset.delhi!==undefined){
+    const[od,doD]=String(t.dataset.delhi).split("|");
+    const z=(D.tydny||[]).find(x=>x.od===od&&x.do===doD); if(!z)return;
+    if(confirm("Smazat z historie období "+czDatum(od)+" – "+czDatum(doD)+"?\n\n"
+      +"marže "+kc(z.marze)+", po reklamě "+kc(z.marzePoReklame)+", "+z.pc+" PC\n\n"
+      +"Spočítat znovu z archivu to půjde, ale údaj o reklamě se tím ztratí.")){
+      D.tydny=D.tydny.filter(x=>!(x.od===od&&x.do===doD));
+      persist(); renderHistorie(); toast("Období smazáno")}
+    return}
   if(t.id==="vySpocti"){renderVyhodnoceni();return}
   if(t.id==="vyUloz"){ulozTyden();return}
   if(t.id==="zmenyCen"){zobrazZmenyCen();return}
