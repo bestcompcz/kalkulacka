@@ -693,6 +693,8 @@ tr.unused td{background:#FEFCFB}
         <tr><td>Sazba DPH</td><td class="r"><input type="number" id="cVat" step="1" class="px"></td><td class="muted">%</td></tr>
         <tr><td>Práce — běžná sestava</td><td class="r"><input type="number" id="cWork" step="10" class="px"></td><td class="muted">Kč</td></tr>
         <tr><td>Licence Windows</td><td class="r"><input type="number" id="cWin" step="10" class="px"></td><td class="muted">Kč</td></tr>
+        <tr><td>Okno historických cen</td><td class="r"><input type="number" id="cOkno" step="10" min="7" class="px"></td><td class="muted">dní &mdash; z jak starých nákupů se bere cena k datu prodeje ve Prodejích</td></tr>
+        <tr><td>Záložní marže na PC</td><td class="r"><input type="number" id="cNahr" step="100" min="0" class="px"></td><td class="muted">Kč bez DPH &mdash; použije se, když se u prodaného počítače nenajde nákupní cena</td></tr>
       </tbody></table></div>
     </div>
   </div>
@@ -1345,7 +1347,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=224;
+const VERZE=226;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3616,21 +3618,31 @@ function grafTydnu(T){
    komponent jsou tady, takže se nákup nemůže rozejít s tím, co se odepisuje. */
 
 /* Nákupní cena komponenty k datu prodeje — pravidlo, že faktury můžou přijít
-   kdykoli. Okno posledních dodaných kusů, stejně jako u skladové ceny. Průměr
-   ze VŠECH nákupů do toho dne by stáhly staré levné dodávky: RTX 5060 Ti by
-   vyšla na 12 154 místo 17 259 a marže o desítky tisíc vyšší. */
+   kdykoli. Vážený průměr nákupů v okně N dní PŘED datem prodeje (Nastavení →
+   Konstanty, výchozí 90). Průměr ze VŠECH nákupů do toho dne by stáhly staré
+   levné dodávky: RTX 5060 Ti by vyšla na 12 154 místo 17 259 a marže o desítky
+   tisíc vyšší.
+
+   Okno NESMÍ být „posledních ks kusů podle dnešního skladu" — tak to počítala
+   v222–v224 a minulý týden se pak posouval při každém odpisu nebo naskladnění:
+   28. 9.–4. 10. spadlo potvrzením odpisu ze 162 686 na 159 039 Kč. Okno v dnech
+   závisí jen na datech nákupů, takže spočítaný týden drží navždy. */
+function oknoCenDni(){ const v=Number((D.nastaveni||{}).oknoCen); return v>0?v:90 }
 function cenaKDatu(id,den){
   const k=najdiKomp(id); if(!k)return 0;
   const n=(D.nakupy||[]).filter(x=>x.komp===id&&!x.vyber&&x.vratka!=="ceka"&&x.vratka!=="vraceno"
       &&x.cena!=null&&x.cena!==""&&(Number(x.dodano)||0)>0&&x.datum&&String(x.datum)<=den)
     .sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
   if(n.length){
-    let zb=Math.max(1,Number(k.ks)||1), s=0, q=0;
-    for(let i=n.length-1;i>=0&&zb>0;i--){
-      const b=Math.min(Number(n[i].dodano)||0,zb);
-      s+=b*(Number(n[i].cena)||0); q+=b; zb-=b;
+    const od=new Date(Date.parse(den+"T00:00:00Z")-oknoCenDni()*86400000).toISOString().slice(0,10);
+    const w=n.filter(x=>String(x.datum)>=od);
+    if(w.length){
+      let s=0,q=0;
+      for(const x of w){ const ks=Number(x.dodano)||0; s+=ks*(Number(x.cena)||0); q+=ks }
+      if(q)return s/q;
     }
-    if(q)return s/q;
+    /* v okně nic — vezmi poslední známou cenu před tím dnem */
+    return Number(n[n.length-1].cena)||0;
   }
   return Number(k.sklad)||Number(k.novy)||0;
 }
@@ -3649,6 +3661,29 @@ function kompPodleKoduEshop(kod){
     if(String(k.kodEshop||"")===String(kod).trim())return k;
   return null;
 }
+/* Rozpoznání položky, u které se nenašla nákupní cena.
+
+   Bez tohohle padala celá cena do marže jako čistý zisk: repasované PC za
+   11 900 Kč (kód 675) nadhodnotilo týden 28. 9.–4. 10. o 9 835 Kč. Takové
+   číslo se nesmí objevit — podle něj se vede firma.
+
+   Silné znaky počítače rozhodují samy. Slabý znak (samotné „PC") platí jen
+   když v názvu není příslušenství, aby „PC skříň Montech" nebyla počítač.
+   Na typ bazaar se spoléhat nejde — „Bazar: RTX 3070" je grafika. */
+const PC_SILNE=/hern[íi]\s*(pc|po[čc][íi]ta[čc])|po[čc][íi]ta[čc]|repasovan[^|]{0,20}\bpc\b|pc\s*sestava|\bsestava\b|desktop/i;
+const PC_SLABE=/(^|[\s|(\[\-–])pc([\s|)\]\-–]|$)/i;
+const PC_PRISL=/sk[řr][íi][ňn]|zdroj|chladi[čc]|ventil[áa]tor|z[áa]kladn[íi] deska|kabel|dr[žz][áa]k|stojan|monitor|kl[áa]vesnic|my[šs]\b|sluch[áa]tk|podlo[žz]k|licen|office|modul|pam[ěe][ťt]|grafick[áa] karta|procesor|pasta|adapt[ée]r|webkamer/i;
+function vypadaJakoPC(t){
+  const s=String(t||"");
+  if(PC_SILNE.test(s))return true;
+  if(PC_PRISL.test(s))return false;
+  return PC_SLABE.test(s);
+}
+/* Služba nebo úkon, u kterého je nulový nákup správně — nezastavuje výpočet. */
+const PC_SLUZBA=/po[šs]tovn|doprav|dod[áa]n[íi]|balen|z[áa]bal|instalac|servis|pr[áa]ce|mont[áa][žz]|diagnostik|[čc]i[šs]t[ěe]n|sleva|p[řr][íi]platek|poukaz|z[áa]ruka|prodlou[žz]en/i;
+const sluzbaBezNakupu=t=>PC_SLUZBA.test(String(t||""));
+/* Záložní marže na počítač bez nákupní ceny, bez DPH. */
+function marzeNahrady(){ const v=Number((D.nastaveni||{}).marzeNahrada); return v>0?v:3000 }
 function vyhodnotObdobi(txt,od,doData){
   const radky=csvRozdel(txt);
   const vat=VAT();            // pozor: lokální VAT by zastínil funkci VAT()
@@ -3659,7 +3694,7 @@ function vyhodnotObdobi(txt,od,doData){
       valuta:String(r.currencyCode||"CZK"),kurz:Number(String(r.currencyExchangeRate||1).replace(",","."))||1,rad:[]});
     obj.get(c).rad.push(r);
   }
-  const out=[], chyby=[], bezNakupu=[];
+  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[];
   for(const o of obj.values()){
     if(od&&o.den<od)continue;
     if(doData&&o.den>doData)continue;
@@ -3712,8 +3747,21 @@ function vyhodnotObdobi(txt,od,doData){
         let kk=kod?kompPodleKoduEshop(kod):null;
         if(!kk&&!kod)kk=komponentaZNazvuProdeje(String(r.orderItemName||""));
         if(kk&&!kk.neomezene)nakup+=poc*cenaKDatu(kk.id,o.den);
-        else if(!kk)bezNakupu.push(o.code+" · "+(kod||"bez kódu")+" · "
-          +String(r.orderItemName||"").slice(0,44)+" · "+kc(cena));
+        else if(!kk){
+          const nz=String(r.orderItemName||"");
+          const popis=o.code+" · "+(kod||"bez kódu")+" · "+nz.slice(0,52);
+          if(vypadaJakoPC(nz)){
+            /* Pojistka: počítač bez nákupní ceny se spočítá se záložní marží,
+               nikdy ne jako čistý zisk v plné ceně. */
+            const mar=marzeNahrady()*poc;
+            const nk=Math.max(0,cena-mar*vat);
+            nakup+=nk; pc+=poc;
+            dopocteno.push({popis,cena,marze:Math.min(mar,cena/vat),
+              pretoceno:(cena/vat)-mar<0});
+          }
+          else if(!kod&&sluzbaBezNakupu(nz))bezNakupu.push(popis+" · "+kc(cena));
+          else nenaparovane.push(popis+" · "+kc(cena));
+        }
       }
     }
     /* Pravidlo 3: do 10 000 Kč platí dopravu zákazník, nad to ji hradím já. */
@@ -3724,7 +3772,7 @@ function vyhodnotObdobi(txt,od,doData){
     out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista});
   }
   out.sort((a,b)=>String(a.den).localeCompare(String(b.den))||a.code.localeCompare(b.code));
-  return {obj:out,chyby:[...new Set(chyby)],bezNakupu};
+  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno};
 }
 function renderVyhodnoceni(){
   /* Stažený archiv má přednost; ruční vstup z panelu výš slouží jako záloha. */
@@ -3741,6 +3789,16 @@ function renderVyhodnoceni(){
     vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
       <strong>Nenapárované příplatky — výpočet zastaven.</strong> Dokud nevím, co se pod nimi osadilo,
       nemůžu spočítat nákup:<br>${R.chyby.map(esc).join("<br>")}</div>`;
+    return}
+  /* Prodané zboží, u kterého se nenašla nákupní cena a není to počítač ani
+     služba. Nulový nákup by nadhodnotil marži o celou jeho cenu, takže se
+     výpočet zastaví — stejně jako u nenapárovaných příplatků. */
+  if(R.nenaparovane.length){
+    stav.textContent="";
+    vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
+      <strong>Nenapárované zboží — výpočet zastaven.</strong> U těchto položek neznám nákupní cenu.
+      Doplň u komponenty <em>kód e-shopu</em>, nebo řekni, co se pod tím prodalo:
+      <br>${R.nenaparovane.map(esc).join("<br>")}</div>`;
     return}
   const L=R.obj;
   if(!L.length){stav.textContent="V tom období nejsou žádné objednávky";vyst.innerHTML="";return}
@@ -3770,6 +3828,14 @@ function renderVyhodnoceni(){
   vyst.innerHTML=`
     ${Rek.chyba&&($("#vyReklama").value||"").trim()?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Výpis reklamy se nepodařilo přečíst</strong> — ${esc(Rek.chyba)}. Zkopíruj i řádek s názvy sloupců.</div>`:""}
+    ${R.dopocteno.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>${R.dopocteno.length===1?"Počítač bez nákupní ceny — dopočten":"Počítače bez nákupní ceny — dopočteny"}
+      se záložní marží ${kc(marzeNahrady())} bez DPH.</strong>
+      Nákup se spočítal zpětně z prodejní ceny, takže marži nenadhodnocuje. Jestli ty kusy máš v Komponentách,
+      doplň jim kód e-shopu a přepočítej:
+      ${R.dopocteno.map(x=>`<br>${esc(x.popis)} · prodáno ${kc(x.cena)} → marže ${kc(x.marze)}`
+        +(x.pretoceno?" <strong>(prodejní cena je nižší než záložní marže — nákup brán jako nulový)</strong>":"")).join("")}
+    </div>`:""}
     ${rozsahPodezrely?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Reklama je zřejmě za jiné období.</strong> Systémy hlásí tržby ${kc(rekTrzby)},
       ale za vybraný rozsah máš obrat ${kc(obrat)}. Zkontroluj, že máš v přehledu stejné datumy.</div>`:""}
@@ -5181,7 +5247,8 @@ function renderNast(){
      <td><select data-wf="${i}" data-wk="modul">${opt(x.modul,"Ostatní")}</select></td>
      <td class="r"><button class="icon-x" data-delwifi="${i}">×</button></td></tr>`).join("");}
   $("#cVat").value=D.nastaveni.vat; $("#cWork").value=D.nastaveni.prace;
-  $("#cWin").value=D.nastaveni.windows; 
+  $("#cWin").value=D.nastaveni.windows; $("#cOkno").value=(Number(D.nastaveni.oknoCen)||90);
+  $("#cNahr").value=(Number(D.nastaveni.marzeNahrada)||3000); 
 }
 /* Křížek svítí jen u pole, ve kterém něco je. */
 function osvezKrizky(){
@@ -5323,9 +5390,12 @@ document.addEventListener("input",e=>{
   if(t.dataset.skp!==undefined){D.skrine.hodnoty[t.dataset.skp]=t.value===""?null:Number(t.value);renderSest();persist()}
   if(t.id==="skExtra"){D.skrine.extra.castka=Number(t.value);renderSest();persist()}
   if(t.id==="skDesky"){D.skrine.extra.desky=t.value;renderSest();persist()}
-  if(["cVat","cWork","cWin"].includes(t.id)){
-    D.nastaveni={...D.nastaveni,vat:+$("#cVat").value,prace:+$("#cWork").value,windows:+$("#cWin").value};
-    renderSest();renderSur();persist();}
+  if(["cVat","cWork","cWin","cOkno","cNahr"].includes(t.id)){
+    D.nastaveni={...D.nastaveni,vat:+$("#cVat").value,prace:+$("#cWork").value,windows:+$("#cWin").value,
+      oknoCen:Math.max(7,+$("#cOkno").value||90),marzeNahrada:Math.max(0,+$("#cNahr").value||3000)};
+    /* změna okna přepočítá jen Prodeje, ceny sestav na něm nezávisí */
+    renderSest();renderSur();persist();
+    if(typeof vyCache!=="undefined")vyCache=null;}
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){$("#modal").hidden=true;modalKomp=null}});
 document.addEventListener("DOMContentLoaded",()=>{
