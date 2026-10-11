@@ -655,6 +655,7 @@ tr.unused td{background:#FEFCFB}
             <input type="text" id="cenikRepo" placeholder="bestcompcz/kalkulacka" style="width:200px"></div>
           <div><div class="muted" style="font-size:11.5px">Heslo k šifrování</div>
             <input type="text" id="cenikHeslo" placeholder="dlouhé a náhodné" style="width:200px"></div>
+          <button class="btn btn-sm" id="cenikGen" title="Vyrobí náhodné heslo přímo tady — nemusí nikam cestovat">Vygenerovat</button>
           <button class="btn btn-sm" id="cenikPublikuj">Publikovat ceník teď</button>
         </div>
         <div id="cenikStav" style="margin-top:8px"></div>
@@ -876,7 +877,7 @@ function oprav(d){
   /* Heslo ze starých dat přesunout do prohlížeče a z dat vymazat. Přepsat
      se nesmí — na tomhle zařízení už může být zadané ruční. */
   if(d.cloud&&d.cloud.cenikHeslo){
-    if(!cenikHeslo())cenikHesloNastav(String(d.cloud.cenikHeslo));
+    if(!cenikHeslo())cenikHesloNastav(String(d.cloud.cenikHeslo),true);
     delete d.cloud.cenikHeslo;
   }
   for(const arr of Object.values(d.komponenty))for(const k of arr){
@@ -1371,7 +1372,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=229;
+const VERZE=230;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1406,7 +1407,23 @@ const ghNastav=t=>{try{t?localStorage.setItem(GH_TOKEN_KEY,t):localStorage.remov
    znamenala rozšifrovatelné nákupní ceny. Na zařízení se zadá jednou. */
 const CENIK_HESLO_KEY="bestcomp-cenik-heslo";
 const cenikHeslo=()=>{try{return localStorage.getItem(CENIK_HESLO_KEY)||""}catch(e){return ""}};
-const cenikHesloNastav=t=>{try{t?localStorage.setItem(CENIK_HESLO_KEY,t):localStorage.removeItem(CENIK_HESLO_KEY)}catch(e){}};
+/* `prenos` = jen přesun téhož hesla ze starých dat do prohlížeče. Tam se otisk
+   zahodit nesmí, publikovaný ceník je zašifrovaný právě tímhle heslem. */
+const cenikHesloNastav=(t,prenos)=>{try{
+  const stare=cenikHeslo();
+  t?localStorage.setItem(CENIK_HESLO_KEY,t):localStorage.removeItem(CENIK_HESLO_KEY);
+  /* Jiné heslo znamená, že soubor na veřejné adrese je zašifrovaný tím starým.
+     Publikování se řídí otiskem cen — bez zahození otisku by řeklo „beze změny"
+     a starou šifru by tam nechalo. */
+  if(!prenos&&String(t||"")!==String(stare))localStorage.removeItem(HASH_KEY);
+}catch(e){}};
+/* Náhodné heslo rovnou v prohlížeči — nemusí nikam cestovat, ani do chatu.
+   Bez podobných znaků (0/O, 1/l/I), ať se dá přepsat rukou. */
+function vygenerujHeslo(n){
+  const z="abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const b=new Uint32Array(n||32); crypto.getRandomValues(b);
+  return [...b].map(x=>z[x%z.length]).join("");
+}
 const cloudOk=()=>!!(D.cloud&&D.cloud.repo&&ghToken());
 /* base64 pro text s diakritikou — btoa samo o sobě na češtinu nestačí */
 function doBase64(txt){
@@ -1869,8 +1886,15 @@ function renderCloud(){
   if(cs){
     const kdy=(D.cloud||{}).cenikKdy;
     const chybiHeslo=(D.cloud||{}).cenikRepo&&!cenikHeslo();
+    /* Otisk chybí jen po změně hesla nebo po prvním spuštění — v obou případech
+       je publikování potřeba, dokud se neprovede. */
+    let nutnoPubl=false;
+    try{nutnoPubl=!!((D.cloud||{}).cenikRepo&&cenikHeslo()&&kdy&&!localStorage.getItem(HASH_KEY))}catch(e){}
     cs.innerHTML=(chybiHeslo?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:7px 10px;margin-bottom:6px;font-size:12px">
       <strong>Heslo v tomhle prohlížeči chybí</strong>, takže se zašifrovaný ceník nepublikuje. Zadej ho — do dat ani do zálohy se nezapisuje.</div>`:"")
+      +(nutnoPubl?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:7px 10px;margin-bottom:6px;font-size:12px">
+      <strong>Heslo se změnilo, ceník ještě ne.</strong> Dej <em>Publikovat ceník teď</em> — na veřejné adrese je zatím
+      verze zašifrovaná starým heslem. A nezapomeň heslo přepsat v projektových instrukcích.</div>`:"")
       +`<span class="muted" style="font-size:11.5px">${kdy
       ?"Ceník naposledy publikován "+new Date(kdy).toLocaleString("cs-CZ")
       :"Ceník se publikuje spolu s daty. Adresa zatím není vyplněná."}</span>`;
@@ -5917,6 +5941,15 @@ document.addEventListener("click",e=>{
     vyCsv=null;vyMinulyTyden(t.id==="vyPredminuly"?2:1);renderVyhodnoceni();return}
   if(t.id==="vyArchiv"){vyhodnotZArchivu();return}
   if(t.id==="hiCsv"){hiCsv();return}
+  if(t.id==="cenikGen"){
+    if((D.cloud||{}).cenikKdy&&!confirm(
+      "Vygenerovat nové heslo k šifrování ceníku?\n\n"
+      +"Staré heslo tím přestane platit. Hned potom dej Publikovat ceník teď, jinak na veřejné adrese\n"
+      +"zůstane ceník zašifrovaný starým heslem.\n\n"
+      +"Nové heslo pak přepiš do projektových instrukcí, jinak podle něj přestane fungovat naceňování."))return;
+    cenikHesloNastav(vygenerujHeslo(32)); renderCloud();
+    toast("Heslo vygenerováno — teď publikuj ceník a přepiš ho v instrukcích");
+    return}
   if(t.dataset.delhi!==undefined){
     const[od,doD]=String(t.dataset.delhi).split("|");
     const z=(D.tydny||[]).find(x=>x.od===od&&x.do===doD); if(!z)return;
