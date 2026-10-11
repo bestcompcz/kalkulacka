@@ -429,7 +429,8 @@ tr.unused td{background:#FEFCFB}
       <input type="date" id="vyOd" style="max-width:150px;font-size:12.5px">
       <span style="font-size:12.5px;font-weight:600">do</span>
       <input type="date" id="vyDo" style="max-width:150px;font-size:12.5px">
-      <button class="btn btn-sm" id="vyMinuly" title="Pondělí až nedělě minulého týdne">Minulý týden</button>
+      <button class="btn btn-sm" id="vyMinuly" title="Pondělí až nedělě minulého týdne" style="line-height:1.25">Minulý týden</button>
+      <button class="btn btn-sm" id="vyPredminuly" title="Pondělí až neděle předminulého týdne" style="line-height:1.25">Předminulý týden</button>
       <button class="btn btn-sm btn-primary" id="vyArchiv" title="Stáhne objednávky za zvolené období z repozitáře a spočítá">↓ Z archivu a spočítat</button>
       <button class="btn btn-sm" id="vySpocti" title="Spočítá z CSV, které je načtené v panelu výš">Spočítat</button>
       <button class="btn btn-sm" id="vyUloz" title="Zapíše období do historie, ať jde kreslit vývoj">Uložit do historie</button>
@@ -1347,7 +1348,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=226;
+const VERZE=227;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3694,7 +3695,7 @@ function vyhodnotObdobi(txt,od,doData){
       valuta:String(r.currencyCode||"CZK"),kurz:Number(String(r.currencyExchangeRate||1).replace(",","."))||1,rad:[]});
     obj.get(c).rad.push(r);
   }
-  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[];
+  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[];
   for(const o of obj.values()){
     if(od&&o.den<od)continue;
     if(doData&&o.den>doData)continue;
@@ -3746,8 +3747,18 @@ function vyhodnotObdobi(txt,od,doData){
       } else {
         let kk=kod?kompPodleKoduEshop(kod):null;
         if(!kk&&!kod)kk=komponentaZNazvuProdeje(String(r.orderItemName||""));
-        if(kk&&!kk.neomezene)nakup+=poc*cenaKDatu(kk.id,o.den);
-        else if(!kk){
+        if(kk){
+          /* Příznak „neomezené" znamená, že se nesleduje stav skladu — ne že
+             je to zdarma. Do v226 se u nich nákup zahazoval, takže Office za
+             60 Kč a Windows za 300 Kč šly do marže celou prodejní cenou.
+             Spony a 12VHPWR adaptéry mají cenu nula právem, tahají se
+             z krabic jiných dílů (ZDARMA_0), proto se u nich nic nehlásí. */
+          const c=cenaKDatu(kk.id,o.den);
+          nakup+=poc*c;
+          if(!(c>0)&&!smiBytNula(kk.nazev))
+            bezCeny.push(o.code+" · "+(kod||"bez kódu")+" · "+String(kk.nazev).slice(0,46)+" · "+kc(cena));
+        }
+        else{
           const nz=String(r.orderItemName||"");
           const popis=o.code+" · "+(kod||"bez kódu")+" · "+nz.slice(0,52);
           if(vypadaJakoPC(nz)){
@@ -3772,7 +3783,7 @@ function vyhodnotObdobi(txt,od,doData){
     out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista});
   }
   out.sort((a,b)=>String(a.den).localeCompare(String(b.den))||a.code.localeCompare(b.code));
-  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno};
+  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny};
 }
 function renderVyhodnoceni(){
   /* Stažený archiv má přednost; ruční vstup z panelu výš slouží jako záloha. */
@@ -3828,6 +3839,12 @@ function renderVyhodnoceni(){
   vyst.innerHTML=`
     ${Rek.chyba&&($("#vyReklama").value||"").trim()?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Výpis reklamy se nepodařilo přečíst</strong> — ${esc(Rek.chyba)}. Zkopíruj i řádek s názvy sloupců.</div>`:""}
+    ${R.bezCeny.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>${R.bezCeny.length===1?"Prodaná položka bez nákupní ceny":"Prodané položky bez nákupní ceny"}.</strong>
+      Komponenta je napárovaná, ale nemá zadanou skladovou ani reprodukční cenu, takže se počítá jako nulový nákup
+      a o tolik je marže nadhodnocená. Doplň jí cenu v Komponentách:
+      ${R.bezCeny.map(x=>`<br>${esc(x)}`).join("")}
+    </div>`:""}
     ${R.dopocteno.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>${R.dopocteno.length===1?"Počítač bez nákupní ceny — dopočten":"Počítače bez nákupní ceny — dopočteny"}
       se záložní marží ${kc(marzeNahrady())} bez DPH.</strong>
@@ -3924,13 +3941,29 @@ function ulozTyden(){
   persist(); renderVyhodnoceni();
   toast("Období uloženo — v historii je "+D.tydny.length);
 }
-/* Pondělí až neděle minulého týdne. */
-function vyMinulyTyden(){
-  const d=new Date(); const den=(d.getDay()+6)%7;           // pondělí = 0
-  const po=new Date(d); po.setDate(d.getDate()-den-7);
-  const ne=new Date(po); ne.setDate(po.getDate()+6);
-  const f=x=>x.toISOString().slice(0,10);
-  $("#vyOd").value=f(po); $("#vyDo").value=f(ne);
+/* Pondělí až neděle týdne o `kolik` zpátky: 1 = minulý, 2 = předminulý.
+   Datum se skládá z místních složek, ne přes toISOString — ten bere UTC
+   a po půlnoci by posouval celý rozsah o den zpátky. */
+function tydenRozsah(kolik){
+  const d=new Date(), den=(d.getDay()+6)%7;                 // pondělí = 0
+  const po=new Date(d.getFullYear(),d.getMonth(),d.getDate()-den-7*(kolik||1));
+  const ne=new Date(po.getFullYear(),po.getMonth(),po.getDate()+6);
+  const f=x=>x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0");
+  return {od:f(po),doD:f(ne)};
+}
+function vyMinulyTyden(kolik){
+  const r=tydenRozsah(kolik||1);
+  $("#vyOd").value=r.od; $("#vyDo").value=r.doD;
+}
+/* Do tlačítek dopsat, k jakým datům se vážou — ať je vidět bez klikání. */
+function popisTydnu(){
+  for(const[id,kolik,jm]of [["vyMinuly",1,"Minulý týden"],["vyPredminuly",2,"Předminulý týden"]]){
+    const b=$("#"+id); if(!b)continue;
+    const r=tydenRozsah(kolik);
+    const den=x=>{const m=String(x).match(/^(\d{4})-(\d{2})-(\d{2})/); return m?+m[3]+". "+ +m[2]+".":x};
+    b.innerHTML=esc(jm)+`<span style="display:block;font-weight:400;font-size:10px;opacity:.72">${esc(den(r.od)+" – "+den(r.doD))}</span>`;
+    b.title=jm+": "+czDatum(r.od)+" až "+czDatum(r.doD);
+  }
 }
 /* ======== naskladnění + přepočet cen + dopad na sestavy (v74) ======== */
 let vseCache=null;
@@ -5257,7 +5290,7 @@ function osvezKrizky(){
     if(inp)w.classList.toggle("ma",!!inp.value);
   }
 }
-function renderAll(){osvezKrizky();renderPripravene();renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderEssox();renderSklad();renderNast();renderOdpisStav();renderCloud();persist()}
+function renderAll(){osvezKrizky();renderPripravene();renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderEssox();renderSklad();renderNast();renderOdpisStav();renderCloud();popisTydnu();persist()}
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),1900)}
 
@@ -5661,7 +5694,8 @@ document.addEventListener("click",e=>{
       +`cena ${kc(c.prodej)}\n\nNa e-shopu produkt zůstane, smaže se jen tady. Vrátit to nejde.`)){
       D.sestavy=D.sestavy.filter(x=>x.id!==t.dataset.dels);renderSest();persist();
       toast("Sestava smazána")}}
-  if(t.id==="vyMinuly"){vyCsv=null;vyMinulyTyden();renderVyhodnoceni();return}
+  if(t.id==="vyMinuly"||t.id==="vyPredminuly"){
+    vyCsv=null;vyMinulyTyden(t.id==="vyPredminuly"?2:1);renderVyhodnoceni();return}
   if(t.id==="vyArchiv"){vyhodnotZArchivu();return}
   if(t.id==="vySpocti"){renderVyhodnoceni();return}
   if(t.id==="vyUloz"){ulozTyden();return}
