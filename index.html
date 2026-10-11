@@ -423,14 +423,15 @@ tr.unused td{background:#FEFCFB}
 
   <div class="card block" style="margin-top:18px">
     <header><span class="rail" style="--k:var(--ok)"></span><h3>Vyhodnocení období</h3></header>
-    <p class="hint" style="padding:8px 12px 0;margin:0">Počítá z téhož CSV, které je výš — z cloudu, z přetaženého souboru nebo z ručně vloženého textu. Nic se neodepisuje, jen se spočítá. Nákupní ceny se berou k datu prodeje, takže na pořadí faktur nezáleží.</p>
+    <p class="hint" style="padding:8px 12px 0;margin:0"><strong>Z archivu</strong> si stáhne objednávky za zvolené období z repozitáře, nezávisle na odpisech — tohle je cesta, kterou chceš použít. <strong>Spočítat</strong> počítá z CSV v panelu výš, když si ho tam načteš sám. Nic se neodepisuje, jen se spočítá. Nákupní ceny se berou k datu prodeje, takže na pořadí faktur nezáleží.</p>
     <div class="row" style="gap:8px;padding:10px 12px;align-items:center;flex-wrap:wrap">
       <span style="font-size:12.5px;font-weight:600">Od</span>
       <input type="date" id="vyOd" style="max-width:150px;font-size:12.5px">
       <span style="font-size:12.5px;font-weight:600">do</span>
       <input type="date" id="vyDo" style="max-width:150px;font-size:12.5px">
       <button class="btn btn-sm" id="vyMinuly" title="Pondělí až nedělě minulého týdne">Minulý týden</button>
-      <button class="btn btn-sm btn-primary" id="vySpocti">Spočítat</button>
+      <button class="btn btn-sm btn-primary" id="vyArchiv" title="Stáhne objednávky za zvolené období z repozitáře a spočítá">↓ Z archivu a spočítat</button>
+      <button class="btn btn-sm" id="vySpocti" title="Spočítá z CSV, které je načtené v panelu výš">Spočítat</button>
       <button class="btn btn-sm" id="vyUloz" title="Zapíše období do historie, ať jde kreslit vývoj">Uložit do historie</button>
       <span class="muted" style="font-size:12px" id="vyStav"></span>
     </div>
@@ -1344,7 +1345,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=223;
+const VERZE=224;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3458,6 +3459,61 @@ function zobrazKosikNahled(pol){
 
 
 
+
+/* ======== objednávky z archivu v repozitáři ======== */
+/* Robot ukládá dávky pod časem stažení, takže se z nich nedá poznat, kde leží
+   objednávky za konkrétní týden. Krok v jeho workflow je proto přerovnává do
+   prodeje/mesice/YYYY-MM.csv a kalkulačka si odtud stáhne jen dotčené měsíce. */
+function mesiceObdobi(od,doD){
+  const out=[];
+  if(!od||!doD||doD<od)return out;
+  let r=Number(od.slice(0,4)), m=Number(od.slice(5,7));
+  const r2=Number(doD.slice(0,4)), m2=Number(doD.slice(5,7));
+  while(r<r2||(r===r2&&m<=m2)){
+    out.push(r+"-"+String(m).padStart(2,"0"));
+    if(++m>12){m=1;r++}
+    if(out.length>36)break;            // pojistka proti nesmyslně dlouhému rozsahu
+  }
+  return out;
+}
+/* Hlavička zůstane ta nejširší ze stažených měsíců; kratší řádky dorovná csvRozdel. */
+function slijCsv(casti){
+  let hl=null; const radky=[];
+  for(const t of casti){
+    const L=String(t||"").replace(/^﻿/,"").split(/\r?\n/).filter(x=>x.trim());
+    if(!L.length)continue;
+    if(hl==null||L[0].split(";").length>hl.split(";").length)hl=L[0];
+    radky.push(...L.slice(1));
+  }
+  return hl?[hl,...radky].join("\n"):"";
+}
+let vyCsv=null;                        // objednávky stažené z archivu
+async function vyhodnotZArchivu(){
+  const st=$("#vyStav");
+  if(!cloudOk()){st.textContent="Nejdřív nastav synchronizaci s cloudem v Nastavení";return}
+  const od=$("#vyOd").value, doD=$("#vyDo").value;
+  if(!od||!doD){st.textContent="Vyplň od i do";return}
+  const M=mesiceObdobi(od,doD);
+  if(!M.length){st.textContent="Datum do je před datem od";return}
+  const c=D.cloud||{}; const casti=[], chybi=[];
+  for(const m of M){
+    st.textContent="stahuji "+m+"…";
+    try{
+      const r=await ghFetch(`https://api.github.com/repos/${c.repo}/contents/prodeje/mesice/${m}.csv`);
+      if(r.status===404){chybi.push(m);continue}
+      if(!r.ok){st.textContent="Nepodařilo se stáhnout "+m+" ("+r.status+")";return}
+      casti.push(zBase64((await r.json()).content));
+    }catch(e){st.textContent="Chyba: "+e.message;return}
+  }
+  if(!casti.length){
+    st.textContent=(M.length>1?"Měsíce "+M.join(", ")+" v archivu nejsou. ":"Měsíc "+M[0]+" v archivu není. ")
+      +"Pusť robota objednávek v Actions s přepínačem „Postavit měsíční soubory znovu z celého archivu“.";
+    return}
+  vyCsv=slijCsv(casti);
+  const poc=vyCsv.split("\n").length-1;
+  renderVyhodnoceni();
+  st.textContent=(chybi.length?"chybí "+chybi.join(", ")+" · ":"")+poc+" položek z archivu";
+}
 /* ======== náklady na reklamu a grafy ======== */
 /* Výpis kanálů ze schránky. Přijde svisle (každá hodnota na svém řádku) i
    s tabulátory, a sloupce se čtou z hlavičky — kdyby se jejich pořadí v přehledu
@@ -3671,7 +3727,8 @@ function vyhodnotObdobi(txt,od,doData){
   return {obj:out,chyby:[...new Set(chyby)],bezNakupu};
 }
 function renderVyhodnoceni(){
-  const txt=($("#pdCsv").value||"").trim();
+  /* Stažený archiv má přednost; ruční vstup z panelu výš slouží jako záloha. */
+  const txt=(vyCsv||$("#pdCsv").value||"").trim();
   const od=$("#vyOd").value, doD=$("#vyDo").value;
   const stav=$("#vyStav"), vyst=$("#vyVystup");
   /* Dokud výpočet neprojde, není co ukládat. Bez tohohle by tlačítko Uložit
@@ -5147,6 +5204,8 @@ document.addEventListener("input",e=>{
   const t=e.target;
   if(t.closest&&t.closest(".hledat"))osvezKrizky();
   if(t.id==="prHledat"){prQ=t.value;renderPripravene();return}
+  /* Jiné období znamená jiné měsíce — stažená data už nemusí stačit. */
+  if(t.id==="vyOd"||t.id==="vyDo"){vyCsv=null;return}
   if(t.dataset.drzc){
     /* Při psaní jen uložíme a dopočítáme dotčený řádek. Překreslit celé okno
        nebo seznam sestav by uteklo kurzoru. */
@@ -5532,7 +5591,8 @@ document.addEventListener("click",e=>{
       +`cena ${kc(c.prodej)}\n\nNa e-shopu produkt zůstane, smaže se jen tady. Vrátit to nejde.`)){
       D.sestavy=D.sestavy.filter(x=>x.id!==t.dataset.dels);renderSest();persist();
       toast("Sestava smazána")}}
-  if(t.id==="vyMinuly"){vyMinulyTyden();renderVyhodnoceni();return}
+  if(t.id==="vyMinuly"){vyCsv=null;vyMinulyTyden();renderVyhodnoceni();return}
+  if(t.id==="vyArchiv"){vyhodnotZArchivu();return}
   if(t.id==="vySpocti"){renderVyhodnoceni();return}
   if(t.id==="vyUloz"){ulozTyden();return}
   if(t.id==="zmenyCen"){zobrazZmenyCen();return}
