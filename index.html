@@ -1322,7 +1322,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=220;
+const VERZE=221;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2388,6 +2388,8 @@ function bezNulovychCen(rows){
     +" zapsal jako zboží zdarma:\n\n"+venku.join(", ")+"\n\nZkontroluj složení a ceny těchto sestav."),50);
   return ok;
 }
+/* Kolik příplatkových čtveřic chybělo v hlavičce posledního načteného CSV. */
+let csvDoplneno=0;
 function csvRozdel(txt){
   /* Uvozovky se řeší dřív než konce řádků — pole s víceřádkovou poznámkou zákazníka
      jinak rozseklo záznam a všechna pole objednávky se načetla prázdná. */
@@ -2406,6 +2408,24 @@ function csvRozdel(txt){
   row.push(c.trim()); if(row.some(x=>x))rows.push(row);
   if(!rows.length)return[];
   const hd=rows[0];
+  /* Shoptet posílá jen tolik příplatkových sloupců, kolik dávka potřebuje. Když
+     se dávky slepí a hlavička zůstane z té užší, mají řádky víc hodnot než
+     hlavička — a protože se hodnoty párují s hlavičkou, přebytečné příplatky
+     by se tiše zahodily. Chybějící hlavičky dopočítáme podle vzoru name/value/price.
+     (Objednávka 20261196 takhle přišla o pátý příplatek, výměnu zdroje za 850W.) */
+  csvDoplneno=0;
+  {/* Hlavička i řádky končí oddělovačem, takže posledním prvkem je prázdno. Musí
+      se odříznout, jinak by doplněná trojice začala až za ním a všechny hodnoty
+      pátého příplatku by se posunuly o jedno pole. */
+   const delka=r=>{let L=r.length; while(L&&!r[L-1])L--; return L};
+   while(hd.length&&!hd[hd.length-1])hd.pop();
+   if(/^itemSurcharge\d+:(price|includingVat|name|value)$/i.test(String(hd[hd.length-1]||""))){
+     const maxLen=rows.reduce((a,r)=>Math.max(a,delka(r)),0);
+     let n=Math.max(0,...hd.filter(x=>/^itemSurcharge\d+:name$/i.test(x))
+       .map(x=>Number(String(x).match(/\d+/)[0])));
+     while(hd.length+3<=maxLen){ n++; csvDoplneno++;
+       hd.push("itemSurcharge"+n+":name","itemSurcharge"+n+":value","itemSurcharge"+n+":price") }
+   }}
   return rows.slice(1).map(v=>{const o={};hd.forEach((k,i)=>o[k]=v[i]??"");return o});
 }
 function najdiSestavu(kod){
@@ -2786,6 +2806,11 @@ function zobrazOdpis(){
   const rozsah=dny.length?(dny.length===1?czDatum(dny[0]):czDatum(dny[0])+" – "+czDatum(dny[dny.length-1])):"";
   $("#mTitle").textContent="Odepsat ze skladu";
   $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Ceny se nemění, mění se jen množství.</p>
+    ${csvDoplneno?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>Hlavička souboru byla užší než data</strong> — chyběl${csvDoplneno>1?"y":""} ${csvDoplneno}
+      příplatkov${csvDoplneno>1?"é sloupce":"ý sloupec"}. Dopočítal jsem ${csvDoplneno>1?"je":"ho"}, takže příplatky
+      navíc se v rozpisu projevily. Stává se to u dávek slepených v cloudu: Shoptet posílá jen tolik
+      sloupců, kolik jich dávka potřebuje. Bez dopočítání by se takový příplatek tiše zahodil.</div>`:""}
     <div style="background:#F1FAF4;border:1px solid #CFE8DA;border-radius:8px;padding:10px 12px;margin-bottom:14px">
       <div style="font-size:12.5px;font-weight:700;margin-bottom:8px">
         ${odepisovane.length} ${odepisovane.length===1?"objednávka":odepisovane.length<5?"objednávky":"objednávek"}${rozsah?" · "+rozsah:""}
