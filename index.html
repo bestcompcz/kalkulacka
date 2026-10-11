@@ -420,6 +420,27 @@ tr.unused td{background:#FEFCFB}
   <div class="card" style="margin-top:12px"><div class="tbl"><table id="pdTab"><thead><tr>
     <th style="width:110px">Objednávka</th><th style="width:96px">Kód</th><th>Sestava</th>
     <th style="width:80px">Datum</th><th style="width:90px">Stav</th></tr></thead><tbody id="pdBody"></tbody></table></div></div>
+
+  <div class="card block" style="margin-top:18px">
+    <header><span class="rail" style="--k:var(--ok)"></span><h3>Vyhodnocení období</h3></header>
+    <p class="hint" style="padding:8px 12px 0;margin:0">Počítá z téhož CSV, které je výš — z cloudu, z přetaženého souboru nebo z ručně vloženého textu. Nic se neodepisuje, jen se spočítá. Nákupní ceny se berou k datu prodeje, takže na pořadí faktur nezáleží.</p>
+    <div class="row" style="gap:8px;padding:10px 12px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12.5px;font-weight:600">Od</span>
+      <input type="date" id="vyOd" style="max-width:150px;font-size:12.5px">
+      <span style="font-size:12.5px;font-weight:600">do</span>
+      <input type="date" id="vyDo" style="max-width:150px;font-size:12.5px">
+      <button class="btn btn-sm" id="vyMinuly" title="Pondělí až nedělě minulého týdne">Minulý týden</button>
+      <button class="btn btn-sm btn-primary" id="vySpocti">Spočítat</button>
+      <button class="btn btn-sm" id="vyUloz" title="Zapíše období do historie, ať jde kreslit vývoj">Uložit do historie</button>
+      <span class="muted" style="font-size:12px" id="vyStav"></span>
+    </div>
+    <details style="padding:0 12px 10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--ink-3)">náklady na reklamu za stejné období</summary>
+      <p class="hint" style="margin:6px 0 4px">Vlož výpis kanálů ze svého přehledu — stačí ho označit a zkopírovat, sloupce se poznají z hlavičky. Z částek se bere <strong>Cena</strong> a počítá se jako náklad bez DPH, takže se odečítá přímo od čisté marže.</p>
+      <textarea id="vyReklama" rows="6" placeholder="source / medium&#10;Zobrazení&#10;Kliknutí&#10;CTR&#10;Cena&#10;…&#10;google / cpc&#10;6 405 283&#10;77 934&#10;1,22 %&#10;578 103 Kč&#10;…"
+        style="width:100%;font-family:var(--mono);font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea>
+    </details>
+    <div id="vyVystup" style="padding:0 12px 12px"></div>
+  </div>
 </section>
 
 <!-- ============ ESSOX ============ -->
@@ -778,6 +799,7 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
      modul zaplatil. Pár se zadává v Nastavení — z názvu se nehádá, protože deska
      s WiFi bývá jiný model i jiný formát než ta bez. */
   if(!Array.isArray(d.wifiDesky))d.wifiDesky=[];
+  if(!Array.isArray(d.tydny))d.tydny=[];      // uložená vyhodnocení období, kvůli vývoji v čase
   for(const arr of Object.values(d.komponenty||{}))for(const k of arr)
     if(k.ksExt===undefined)k.ksExt=null;       // kusy uložené v externím skladu
   if(!d.cloud)d.cloud={repo:"",path:"data.json"};
@@ -1322,7 +1344,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=221;
+const VERZE=223;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3434,6 +3456,359 @@ function zobrazKosikNahled(pol){
   $("#modal").hidden=false;
 }
 
+
+
+/* ======== náklady na reklamu a grafy ======== */
+/* Výpis kanálů ze schránky. Přijde svisle (každá hodnota na svém řádku) i
+   s tabulátory, a sloupce se čtou z hlavičky — kdyby se jejich pořadí v přehledu
+   změnilo, nesmí se tím rozhodit, co je Cena. */
+function rozeberReklamu(txt){
+  const cis=s=>{const t=String(s||"").replace(/[\s ]/g,"").replace(/(Kč|CZK|%)/gi,"").replace(",",".");
+    const v=Number(t); return isFinite(v)?v:null};
+  const jeNazev=s=>/\s\/\s/.test(s)||/^celkov/i.test(s);
+  let L=String(txt||"").split(/\r?\n/).map(x=>x.replace(/ /g," ").trim())
+    .filter(x=>x&&!/^[▼▲↑↓]+$/.test(x));
+  if(L.some(x=>x.includes("\t")))
+    L=L.flatMap(x=>x.includes("\t")?x.split("\t").map(y=>y.trim()).filter(Boolean):[x]);
+  /* „source / medium" je nadpis sloupce, ne kanál — jinak by vyšla prázdná hlavička. */
+  L=L.filter(x=>!/^source\s*\/\s*medium$/i.test(x));
+  const i0=L.findIndex(jeNazev);
+  if(i0<0)return {radky:[],chyba:"nenašel jsem řádek typu „google / cpc“"};
+  const hlav=L.slice(0,i0);
+  if(!hlav.length)return {radky:[],chyba:"chybí řádek s názvy sloupců"};
+  const n=hlav.length;
+  const idx=a=>hlav.findIndex(x=>a.some(y=>x.toLowerCase().startsWith(y)));
+  const iCena=idx(["cena","náklady","naklady","cost"]);
+  if(iCena<0)return {radky:[],chyba:"v hlavičce není sloupec Cena"};
+  const M={cena:iCena,zobrazeni:idx(["zobrazení","zobrazeni","impres"]),kliky:idx(["kliknutí","kliknuti","klik"]),
+    konverze:idx(["konverze"]),trzby:idx(["tržby","trzby","obrat","hodnota konverz"])};
+  const radky=[]; let celkem=null;
+  for(let i=i0;i<L.length;){
+    const nazev=L[i];
+    if(!jeNazev(nazev)){i++;continue}
+    const v=L.slice(i+1,i+1+n).map(cis);
+    const o={nazev,cena:v[M.cena]||0,
+      zobrazeni:M.zobrazeni>=0?v[M.zobrazeni]:null,kliky:M.kliky>=0?v[M.kliky]:null,
+      konverze:M.konverze>=0?v[M.konverze]:null,trzby:M.trzby>=0?v[M.trzby]:null};
+    if(/^celkov/i.test(nazev))celkem=o; else radky.push(o);
+    i+=1+n;
+  }
+  radky.sort((a,b)=>b.cena-a.cena);
+  return {radky,celkem};
+}
+/* Vodorovný sloupec se zakulaceným koncem a hranatou patou u osy. */
+function barH(x,y,w,hh,r){
+  r=Math.max(0,Math.min(r,w,hh/2));
+  return `M${x},${y}H${x+w-r}a${r},${r} 0 0 1 ${r},${r}V${y+hh-r}a${r},${r} 0 0 1 ${-r},${r}H${x}Z`;
+}
+function barV(x,y,w,hh,r){
+  r=Math.max(0,Math.min(r,hh,w/2));
+  return `M${x},${y+hh}V${y+r}a${r},${r} 0 0 1 ${r},${-r}H${x+w-r}a${r},${r} 0 0 1 ${r},${r}V${y+hh}Z`;
+}
+/* Náklady po kanálech. Jedna metrika, tedy jedna barva — kanál nese popisek
+   vlevo, takže identita nestojí na barvě a legenda není potřeba. */
+function grafKanalu(radky){
+  if(!radky.length)return "";
+  const W=560,LH=26,PL=130,PR=96,H=radky.length*LH+26;
+  const max=Math.max(...radky.map(x=>x.cena))||1;
+  const sc=v=>(W-PL-PR)*v/max;
+  const tik=[0,.25,.5,.75,1].map(f=>f*max);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-width:${W}px" role="img"
+    aria-label="Náklady na reklamu po kanálech">
+    ${tik.map(t=>`<line x1="${(PL+sc(t)).toFixed(1)}" y1="14" x2="${(PL+sc(t)).toFixed(1)}" y2="${H-12}"
+      stroke="var(--line)" stroke-width="1"/>`).join("")}
+    ${tik.map(t=>`<text x="${(PL+sc(t)).toFixed(1)}" y="${H-2}" text-anchor="middle"
+      font-size="9.5" fill="var(--ink-3)">${t>=1000?Math.round(t/1000)+"k":Math.round(t)}</text>`).join("")}
+    ${radky.map((x,i)=>{const y=14+i*LH, bh=Math.min(16,LH-8);
+      return `<g><title>${esc(x.nazev)} — ${kc(x.cena)}${x.kliky!=null?", "+x.kliky.toLocaleString("cs")+" kliknutí":""}${x.konverze!=null?", "+x.konverze+" konverzí":""}</title>
+      <text x="${PL-8}" y="${y+bh/2+3.5}" text-anchor="end" font-size="11" fill="var(--ink-2)">${esc(x.nazev)}</text>
+      <path d="${barH(PL,y,Math.max(1,sc(x.cena)),bh,4)}" fill="#D1541A"/>
+      <text x="${PL+sc(x.cena)+7}" y="${y+bh/2+3.5}" font-size="11" fill="var(--ink)" font-weight="600">${kc(x.cena)}</text></g>`}).join("")}
+  </svg>`;
+}
+/* Vývoj po obdobích: marže a marže po reklamě. Dvě série, takže legenda. */
+function grafTydnu(T){
+  if(T.length<2)return "";
+  const W=560,H=190,PL=52,PR=12,PT=16,PB=34;
+  const max=Math.max(...T.flatMap(x=>[x.marze,x.marzePoReklame]),1);
+  const bw=Math.min(22,(W-PL-PR)/T.length/2.4);
+  const krok=(W-PL-PR)/T.length;
+  const y0=H-PB, sc=v=>(y0-PT)*v/max;
+  const tik=[0,.5,1].map(f=>f*max);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-width:${W}px" role="img"
+    aria-label="Vývoj čisté marže po obdobích">
+    ${tik.map(t=>`<line x1="${PL}" y1="${(y0-sc(t)).toFixed(1)}" x2="${W-PR}" y2="${(y0-sc(t)).toFixed(1)}"
+      stroke="var(--line)" stroke-width="1"/>
+      <text x="${PL-6}" y="${(y0-sc(t)+3.5).toFixed(1)}" text-anchor="end" font-size="9.5"
+      fill="var(--ink-3)">${t>=1000?Math.round(t/1000)+"k":Math.round(t)}</text>`).join("")}
+    ${T.map((x,i)=>{const xc=PL+krok*i+krok/2;
+      const a=sc(Math.max(0,x.marze)), b=sc(Math.max(0,x.marzePoReklame));
+      return `<g><title>${esc(x.od)} – ${esc(x.do)}: marže ${kc(x.marze)}, po reklamě ${kc(x.marzePoReklame)}, ${x.pc} PC</title>
+        <path d="${barV(xc-bw-1,y0-a,bw,a,4)}" fill="#1F8A5B"/>
+        <path d="${barV(xc+1,y0-b,bw,b,4)}" fill="#2E5FBF"/>
+        <text x="${xc}" y="${H-20}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)">${esc(czDatum(x.od).replace(/\s*\d{4}$/,""))}</text>
+      </g>`}).join("")}
+    <line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--line-2)" stroke-width="1"/>
+  </svg>
+  <div class="row" style="gap:14px;font-size:11.5px;color:var(--ink-2);margin-top:2px">
+    <span class="row" style="gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#1F8A5B"></span>čistá marže</span>
+    <span class="row" style="gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#2E5FBF"></span>po reklamě</span>
+  </div>`;
+}
+/* ======== vyhodnocení období: obrat, nákup, poplatky, čistá marže ========
+   Dřív to počítal skript mimo kalkulačku. Patří sem: rozpad sestav i ceny
+   komponent jsou tady, takže se nákup nemůže rozejít s tím, co se odepisuje. */
+
+/* Nákupní cena komponenty k datu prodeje — pravidlo, že faktury můžou přijít
+   kdykoli. Okno posledních dodaných kusů, stejně jako u skladové ceny. Průměr
+   ze VŠECH nákupů do toho dne by stáhly staré levné dodávky: RTX 5060 Ti by
+   vyšla na 12 154 místo 17 259 a marže o desítky tisíc vyšší. */
+function cenaKDatu(id,den){
+  const k=najdiKomp(id); if(!k)return 0;
+  const n=(D.nakupy||[]).filter(x=>x.komp===id&&!x.vyber&&x.vratka!=="ceka"&&x.vratka!=="vraceno"
+      &&x.cena!=null&&x.cena!==""&&(Number(x.dodano)||0)>0&&x.datum&&String(x.datum)<=den)
+    .sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
+  if(n.length){
+    let zb=Math.max(1,Number(k.ks)||1), s=0, q=0;
+    for(let i=n.length-1;i>=0&&zb>0;i--){
+      const b=Math.min(Number(n[i].dodano)||0,zb);
+      s+=b*(Number(n[i].cena)||0); q+=b; zb-=b;
+    }
+    if(q)return s/q;
+  }
+  return Number(k.sklad)||Number(k.novy)||0;
+}
+/* Náklad na dopravu nebo platbu podle klíčového slova z Nastavení. */
+function nakladZTabulky(text,zaklad){
+  const t=String(text||"").toLowerCase();
+  for(const n of (D.naklady||[])){
+    const kl=String(n.klic||"").toLowerCase().trim(); if(!kl)continue;
+    if(t.includes(kl))return n.typ==="procenta"?zaklad*(Number(n.hodnota)||0)/100:(Number(n.hodnota)||0);
+  }
+  return 0;
+}
+function kompPodleKoduEshop(kod){
+  if(!String(kod||"").trim())return null;
+  for(const a of Object.values(D.komponenty))for(const k of a)
+    if(String(k.kodEshop||"")===String(kod).trim())return k;
+  return null;
+}
+function vyhodnotObdobi(txt,od,doData){
+  const radky=csvRozdel(txt);
+  const vat=VAT();            // pozor: lokální VAT by zastínil funkci VAT()
+  const obj=new Map();
+  for(const r of radky){
+    const c=String(r.code||"").trim(); if(!c)continue;
+    if(!obj.has(c))obj.set(c,{code:c,den:String(r.date||"").slice(0,10),
+      valuta:String(r.currencyCode||"CZK"),kurz:Number(String(r.currencyExchangeRate||1).replace(",","."))||1,rad:[]});
+    obj.get(c).rad.push(r);
+  }
+  const out=[], chyby=[], bezNakupu=[];
+  for(const o of obj.values()){
+    if(od&&o.den<od)continue;
+    if(doData&&o.den>doData)continue;
+    /* Pravidlo 7: v currencyExchangeRate je počet eur za korunu, takže se dělí. */
+    const pre=v=>o.valuta!=="CZK"?v/o.kurz:v;
+    let trzba=0,nakup=0,pc=0,slevy=0,doprPlatil=0,platPlatil=0,doprText="",platText="";
+    for(const r of o.rad){
+      const typ=String(r.orderItemType||"");
+      const cena=pre(Number(String(r.orderItemUnitPriceWithVat||0).replace(/\s/g,"").replace(",","."))||0)
+        *(Number(String(r.orderItemAmount||1).replace(",","."))||1);
+      if(typ==="shipping"){doprText=String(r.orderItemName||"");doprPlatil+=cena;continue}
+      if(typ==="billing"){platText=String(r.orderItemName||"");
+        if(cena<0)slevy+=-cena; else platPlatil+=cena; continue}
+      if(typ==="discount"){slevy+=-cena;continue}          // pravidlo 5: sleva jednou na objednávku
+      if(typ!=="product"&&typ!=="bazaar")continue;
+      const kod=String(r.orderItemCode??r.itemCode??"").trim();
+      const poc=Number(String(r.orderItemAmount||1).replace(",","."))||1;
+      trzba+=cena;                                          // pravidlo 1: cena už příplatky obsahuje
+      const s=najdiSestavu(kod);
+      if(s){
+        pc+=poc;
+        const skr=skrinZRadku(r,kod);                       // pravidlo 2: skříň z přípony kódu
+        const bar=barvaZeSkrine(skr);
+        const m=rozpadSestavy(s,kod,poc,skr);
+        const chlPrip=[],chlCpu=[];
+        for(let i=1;i<=20;i++){
+          const v=r["itemSurcharge"+i+":value"]; if(!v)continue;
+          const pp=najdiPriplatek(v);
+          if(!pp){chyby.push(v);continue}
+          const kat=katKomp(pp.to);
+          const stary=kat==="Ostatní"?null:(s.vyber||{})[kat];
+          if(stary&&m.has(stary))m.set(stary,m.get(stary)-poc);
+          const cil=podleBarvy(konkretniChladic(pp.to,s),bar);
+          if(cil)m.set(cil,(m.get(cil)||0)+poc);
+          if(kat==="Chladič")chlPrip.push(cil);
+          if(pp.chlNa){const ch=(s.vyber||{})["Chladič"]; if(ch&&m.has(ch))m.set(ch,m.get(ch)-poc);
+            const cid=podleBarvy(konkretniChladic(pp.chlNa,s),bar);
+            if(cid)m.set(cid,(m.get(cid)||0)+poc); chlCpu.push(cid)}
+        }
+        if(chlPrip.length&&chlCpu.length){                  // osadí se jen jeden chladič
+          const ur=id=>urovenChl((najdiKomp(id)||{}).nazev||"");
+          const pryc=Math.max(...chlPrip.map(ur))>Math.max(...chlCpu.map(ur))?chlCpu:chlPrip;
+          for(const id of pryc)if(m.has(id))m.set(id,m.get(id)-poc);
+        }
+        let nk=0;
+        for(const[id,q]of m)if(q>0)nk+=q*cenaKDatu(id,o.den);
+        nk+=poc*((Number(D.nastaveni.prace)||0)+(Number(D.nastaveni.windows)||0));
+        nakup+=nk;
+      } else {
+        let kk=kod?kompPodleKoduEshop(kod):null;
+        if(!kk&&!kod)kk=komponentaZNazvuProdeje(String(r.orderItemName||""));
+        if(kk&&!kk.neomezene)nakup+=poc*cenaKDatu(kk.id,o.den);
+        else if(!kk)bezNakupu.push(o.code+" · "+(kod||"bez kódu")+" · "
+          +String(r.orderItemName||"").slice(0,44)+" · "+kc(cena));
+      }
+    }
+    /* Pravidlo 3: do 10 000 Kč platí dopravu zákazník, nad to ji hradím já. */
+    const dopravaMoje=Math.max(0,nakladZTabulky(doprText,0)-doprPlatil);
+    /* Pravidlo 4: poplatek za platbu z celé objednávky, tedy zboží + doprava + služby. */
+    const platNakl=nakladZTabulky(platText,trzba+doprPlatil+platPlatil);
+    const cista=(trzba-slevy-nakup-dopravaMoje-platNakl)/vat;
+    out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista});
+  }
+  out.sort((a,b)=>String(a.den).localeCompare(String(b.den))||a.code.localeCompare(b.code));
+  return {obj:out,chyby:[...new Set(chyby)],bezNakupu};
+}
+function renderVyhodnoceni(){
+  const txt=($("#pdCsv").value||"").trim();
+  const od=$("#vyOd").value, doD=$("#vyDo").value;
+  const stav=$("#vyStav"), vyst=$("#vyVystup");
+  /* Dokud výpočet neprojde, není co ukládat. Bez tohohle by tlačítko Uložit
+     zapsalo zůstatek z předchozího období pod nově zadanými datumy. */
+  vyCache=null;
+  if(!txt){stav.textContent="Nejdřív načti objednávky výš";vyst.innerHTML="";return}
+  let R; try{R=vyhodnotObdobi(txt,od,doD)}catch(e){stav.textContent="CSV se nepodařilo přečíst";return}
+  if(R.chyby.length){
+    stav.textContent="";
+    vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
+      <strong>Nenapárované příplatky — výpočet zastaven.</strong> Dokud nevím, co se pod nimi osadilo,
+      nemůžu spočítat nákup:<br>${R.chyby.map(esc).join("<br>")}</div>`;
+    return}
+  const L=R.obj;
+  if(!L.length){stav.textContent="V tom období nejsou žádné objednávky";vyst.innerHTML="";return}
+  const S=f=>L.reduce((a,x)=>a+f(x),0);
+  const obrat=S(x=>x.trzba), sl=S(x=>x.slevy), nak=S(x=>x.nakup);
+  const dopr=S(x=>x.dopravaMoje), plat=S(x=>x.platNakl), cista=S(x=>x.cista);
+  const trzbaBez=(obrat-sl)/VAT();
+  const pct=trzbaBez?100*cista/trzbaBez:0;
+  /* po dnech */
+  const dny=new Map();
+  for(const x of L){const d=dny.get(x.den)||{pc:0,trzba:0,cista:0,n:0};
+    d.pc+=x.pc;d.trzba+=x.trzba;d.cista+=x.cista;d.n++;dny.set(x.den,d)}
+  /* Reklama. Částky z přehledu jsou bez DPH, takže se odečtou přímo od čisté marže. */
+  const Rek=rozeberReklamu($("#vyReklama").value||"");
+  const rek=Rek.radky.length?Rek:null;
+  const rekCena=rek?rek.radky.reduce((a,x)=>a+x.cena,0):0;
+  const poRek=cista-rekCena;
+  const pctPoRek=trzbaBez?100*poRek/trzbaBez:0;
+  const pc=S(x=>x.pc);
+  /* Pojistka na nejčastější omyl: vložený přehled je za delší období než vybraný
+     týden. Pozná se podle tržeb, které reklamní systém hlásí. */
+  const rekTrzby=rek?rek.radky.reduce((a,x)=>a+(x.trzby||0),0):0;
+  const rozsahPodezrely=rekTrzby>0&&rekTrzby>3*obrat;
+  vyCache={od,doD,L,obrat,sl,nak,dopr,plat,cista,trzbaBez,pc,rekCena,poRek,
+    kanaly:rek?rek.radky.map(x=>({nazev:x.nazev,cena:x.cena,konverze:x.konverze,kliky:x.kliky})):[]};
+  stav.textContent="";
+  vyst.innerHTML=`
+    ${Rek.chyba&&($("#vyReklama").value||"").trim()?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>Výpis reklamy se nepodařilo přečíst</strong> — ${esc(Rek.chyba)}. Zkopíruj i řádek s názvy sloupců.</div>`:""}
+    ${rozsahPodezrely?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>Reklama je zřejmě za jiné období.</strong> Systémy hlásí tržby ${kc(rekTrzby)},
+      ale za vybraný rozsah máš obrat ${kc(obrat)}. Zkontroluj, že máš v přehledu stejné datumy.</div>`:""}
+    <div class="row" style="gap:26px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div><div class="muted" style="font-size:11.5px">Objednávek</div><div class="price" style="font-size:22px">${L.length}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Prodaných PC</div><div class="price" style="font-size:22px">${S(x=>x.pc)}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Obrat s DPH</div><div class="price" style="font-size:22px">${kc(obrat)}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Čistá marže</div>
+        <div class="price" style="font-size:22px;color:${cista<0?"var(--bad)":"var(--ok)"}">${kc(cista)}</div>
+        <div class="muted" style="font-size:11.5px">${pct.toFixed(1)} % z tržby bez DPH</div></div>
+      ${rek?`<div><div class="muted" style="font-size:11.5px">Po reklamě</div>
+        <div class="price" style="font-size:22px;color:${poRek<0?"var(--bad)":"var(--ok)"}">${kc(poRek)}</div>
+        <div class="muted" style="font-size:11.5px">${pctPoRek.toFixed(1)} % · reklama ${kc(rekCena)}</div></div>`:""}
+    </div>
+    <div class="tbl" style="margin-bottom:12px"><table><tbody>
+      <tr><td>Obrat s DPH</td><td class="r num">${kc(obrat)}</td></tr>
+      <tr><td>Slevy</td><td class="r num">-${kc(sl)}</td></tr>
+      <tr><td><strong>Tržba bez DPH</strong></td><td class="r num"><strong>${kc(trzbaBez)}</strong></td></tr>
+      <tr><td>Nákup bez DPH</td><td class="r num">-${kc(nak/VAT())}</td></tr>
+      <tr><td>Doprava, kterou jsi platil ty</td><td class="r num">-${kc(dopr/VAT())}</td></tr>
+      <tr><td>Poplatky za platbu</td><td class="r num">-${kc(plat/VAT())}</td></tr>
+      <tr><td><strong>Čistá marže</strong></td><td class="r num"><strong>${kc(cista)}</strong></td></tr>
+      ${rek?`<tr><td>Reklama (bez DPH)</td><td class="r num">-${kc(rekCena)}</td></tr>
+      <tr><td><strong>Marže po reklamě</strong></td><td class="r num"><strong style="color:${poRek<0?"var(--bad)":"var(--ok)"}">${kc(poRek)}</strong></td></tr>`:""}
+    </tbody></table></div>
+    ${rek?`<div class="row" style="gap:26px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px">
+      <div><div class="muted" style="font-size:11.5px">PNO z tržby bez DPH</div>
+        <div style="font-weight:700">${(100*rekCena/trzbaBez).toFixed(1)} %</div></div>
+      <div><div class="muted" style="font-size:11.5px">Reklama na prodané PC</div>
+        <div style="font-weight:700">${pc?kc(rekCena/pc):"—"}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Marže na PC po reklamě</div>
+        <div style="font-weight:700">${pc?kc(poRek/pc):"—"}</div></div>
+      <div><div class="muted" style="font-size:11.5px">Konverzí hlásí systémy</div>
+        <div style="font-weight:700">${rek.radky.reduce((a,x)=>a+(x.konverze||0),0)||"—"}
+          <span class="muted" style="font-weight:400">proti ${L.length} objednávkám</span></div></div>
+    </div>
+    <div style="font-size:12.5px;font-weight:700;margin:0 0 4px">Náklady na reklamu po kanálech</div>
+    ${grafKanalu(rek.radky)}
+    <div class="tbl" style="margin:8px 0 14px"><table><thead><tr><th>Kanál</th><th class="r">Cena</th>
+      <th class="r" style="width:64px">Podíl</th><th class="r" style="width:72px">Konverze</th>
+      <th class="r" style="width:86px">Cena/konverze</th></tr></thead><tbody>
+      ${rek.radky.map(x=>`<tr><td>${esc(x.nazev)}</td><td class="r num">${kc(x.cena)}</td>
+        <td class="r num">${(100*x.cena/(rekCena||1)).toFixed(0)} %</td>
+        <td class="r num">${x.konverze!=null?x.konverze:"—"}</td>
+        <td class="r num">${x.konverze?kc(x.cena/x.konverze):"—"}</td></tr>`).join("")}
+      </tbody></table></div>`:""}
+    ${(D.tydny||[]).length>1?`<div style="font-size:12.5px;font-weight:700;margin:14px 0 4px">Vývoj po obdobích</div>
+      ${grafTydnu(D.tydny)}`:""}
+    ${R.bezNakupu.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>Položky bez nákupní ceny</strong> — v marži jsou jako čistý zisk, takže je o jejich nákup nadhodnocená:
+      <br>${R.bezNakupu.map(esc).join("<br>")}</div>`:""}
+    <div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1 1 280px;min-width:260px">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:4px">Po dnech</div>
+        <div class="tbl"><table><thead><tr><th>Den</th><th class="r" style="width:42px">Obj.</th>
+          <th class="r" style="width:38px">PC</th><th class="r">Obrat</th><th class="r">Marže</th></tr></thead><tbody>
+        ${[...dny.entries()].sort().map(([d,v])=>`<tr><td class="num">${esc(czDatum(d))}</td>
+          <td class="r num">${v.n}</td><td class="r num">${v.pc}</td>
+          <td class="r num">${kc(v.trzba)}</td><td class="r num">${kc(v.cista)}</td></tr>`).join("")}
+        </tbody></table></div></div>
+      <div style="flex:2 1 420px;min-width:320px">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:4px">Po objednávkách</div>
+        <div class="tbl"><table><thead><tr><th style="width:92px">Objednávka</th><th class="r" style="width:38px">PC</th>
+          <th class="r">Tržba</th><th class="r">Nákup</th><th class="r">Náklady</th><th class="r">Marže</th></tr></thead><tbody>
+        ${L.map(x=>`<tr><td class="num">${esc(x.code)}<div class="muted" style="font-size:10.5px">${esc(czDatum(x.den))}</div></td>
+          <td class="r num">${x.pc||""}</td><td class="r num">${kc(x.trzba)}</td><td class="r num">${kc(x.nakup)}</td>
+          <td class="r num">${kc(x.dopravaMoje+x.platNakl+x.slevy)}</td>
+          <td class="r num" style="font-weight:600;color:${x.cista<0?"var(--bad)":""}">${kc(x.cista)}</td></tr>`).join("")}
+        </tbody></table></div></div>
+    </div>`;
+}
+let vyCache=null;
+/* Uloží spočítané období do historie, ať je z čeho kreslit vývoj. Stejné datumy
+   přepíšou starý záznam, aby se po opravě dat nehromadily duplikáty. */
+function ulozTyden(){
+  if(!vyCache){toast("Nejdřív to spočítej");return}
+  const z={od:vyCache.od,do:vyCache.doD,obj:vyCache.L.length,pc:vyCache.pc,
+    obrat:Math.round(vyCache.obrat),trzba:Math.round(vyCache.trzbaBez),
+    nakup:Math.round(vyCache.nak/VAT()),marze:Math.round(vyCache.cista),
+    reklama:Math.round(vyCache.rekCena),marzePoReklame:Math.round(vyCache.poRek),
+    kanaly:vyCache.kanaly.map(x=>({nazev:x.nazev,cena:Math.round(x.cena),konverze:x.konverze}))};
+  if(!z.od||!z.do){toast("Vyplň od i do, jinak nevím, co ukládám");return}
+  D.tydny=(D.tydny||[]).filter(x=>!(x.od===z.od&&x.do===z.do));
+  D.tydny.push(z);
+  D.tydny.sort((a,b)=>String(a.od).localeCompare(String(b.od)));
+  persist(); renderVyhodnoceni();
+  toast("Období uloženo — v historii je "+D.tydny.length);
+}
+/* Pondělí až neděle minulého týdne. */
+function vyMinulyTyden(){
+  const d=new Date(); const den=(d.getDay()+6)%7;           // pondělí = 0
+  const po=new Date(d); po.setDate(d.getDate()-den-7);
+  const ne=new Date(po); ne.setDate(po.getDate()+6);
+  const f=x=>x.toISOString().slice(0,10);
+  $("#vyOd").value=f(po); $("#vyDo").value=f(ne);
+}
 /* ======== naskladnění + přepočet cen + dopad na sestavy (v74) ======== */
 let vseCache=null;
 /* komponenty, které se legitimně tahají zdarma z krabic jiných dílů */
@@ -5157,6 +5532,9 @@ document.addEventListener("click",e=>{
       +`cena ${kc(c.prodej)}\n\nNa e-shopu produkt zůstane, smaže se jen tady. Vrátit to nejde.`)){
       D.sestavy=D.sestavy.filter(x=>x.id!==t.dataset.dels);renderSest();persist();
       toast("Sestava smazána")}}
+  if(t.id==="vyMinuly"){vyMinulyTyden();renderVyhodnoceni();return}
+  if(t.id==="vySpocti"){renderVyhodnoceni();return}
+  if(t.id==="vyUloz"){ulozTyden();return}
   if(t.id==="zmenyCen"){zobrazZmenyCen();return}
   if(t.id==="czZrus"){cenyCache=null;$("#modal").hidden=true;return}
   if(t.id==="czOk"){
