@@ -364,6 +364,8 @@ tr.unused td{background:#FEFCFB}
     <button class="btn btn-sm" id="expNavod" title="Jak na export">?</button>
     <button class="btn btn-sm" id="impCeny" title="Načte export produktů ze Shoptetu do kalkulačky">Načíst ↑ z e-shopu do kalkulačky</button>
     <input type="file" id="cenyFile" accept=".csv,text/csv" style="display:none">
+    <button class="btn btn-sm" id="impUrl" title="Z universal feedu (XML) doplní sestavám adresu na e-shopu">Doplnit URL ↑ z feedu</button>
+    <input type="file" id="urlFile" accept=".xml,text/xml,application/xml" style="display:none">
     <span class="hledat" data-obal="sestHledat" style="max-width:240px;margin-left:auto"><input type="text" id="sestHledat" placeholder="Hledat sestavu nebo kód…" style="width:100%"><button class="smaz" data-smaz="sestHledat" title="Zrušit hledání" aria-label="Zrušit hledání">×</button></span>
     <button class="btn btn-sm" id="sestRozbal" title="Rozbalit nebo sbalit všechny">Rozbalit vše</button>
   </div>
@@ -1372,7 +1374,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=230;
+const VERZE=233;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1824,6 +1826,106 @@ function zmenyCen(){
         jenLevel:stara===nova&&spatnyLevel});
   }
   return out.sort((a,b)=>Math.abs((b.nova-(b.stara??b.nova)))-Math.abs((a.nova-(a.stara??a.nova))));
+}
+/* ======== URL sestav z universal feedu (v233) ========
+   Pole URL u sestavy jde do zašifrovaného ceníku a slouží k tomu, abych při
+   naceňování poznal, že poptávce odpovídá hotový produkt na e-shopu. Ručně
+   se 44 adres opisovat nebude, tak se tahají z feedu.
+
+   Kód produktu se bere ze dvou nezávislých míst: z PRODUCTNO ve tvaru
+   BC<kód><přípona> a z cesty k obrázku /orig/<kód>[-_]. Když si odporují,
+   řádek se označí a nepřepíše se nic — u repasovaných PC se obě čísla reálně
+   rozcházejí (kód 675 proti obrázku 677), takže na jedno číslo spoléhat nejde. */
+function feedProdukty(txt){
+  const dok=new DOMParser().parseFromString(txt,"application/xml");
+  if(dok.querySelector("parsererror"))throw new Error("tohle není platné XML");
+  const out=new Map();
+  for(const it of dok.querySelectorAll("SHOPITEM")){
+    const tx=n=>{const e=it.querySelector(n); return e?String(e.textContent||"").trim():""};
+    const url=tx("URL"); if(!url)continue;
+    const mPn=tx("PRODUCTNO").match(/^BC(\d+)/i);
+    const mIm=tx("IMGURL").match(/\/orig\/(\d+)[-_]/);
+    const zPn=mPn?mPn[1]:null, zIm=mIm?mIm[1]:null;
+    const kod=zPn||zIm; if(!kod)continue;
+    const zakl=url.split("?")[0];
+    if(!out.has(kod))out.set(kod,{kod,url:zakl,nazev:tx("PRODUCT"),
+      spor:!!(zPn&&zIm&&zPn!==zIm),zPn,zIm,variant:0});
+    out.get(kod).variant++;
+  }
+  return out;
+}
+/* Porovnání slov názvu sestavy a názvu produktu — kontrola pro oko, ne pro stroj. */
+function shodaNazvu(a,b){
+  const sl=s=>new Set(String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).filter(x=>x.length>1));
+  const A=sl(a), B=sl(b); if(!A.size)return 0;
+  let n=0; for(const x of A)if(B.has(x))n++;
+  return n/A.size;
+}
+let urlCache=null;
+function nactiUrlZFeedu(txt){
+  let P; try{P=feedProdukty(txt)}catch(e){toast("Feed se nepodařilo přečíst — "+e.message);return}
+  if(!P.size){toast("Ve feedu nejsou žádné produkty s kódem BC… ani s obrázkem");return}
+  const L=[];
+  for(const s of D.sestavy){
+    const kod=String(s.kod||"").split(",")[0].trim().split("/")[0].trim();
+    if(!kod){L.push({s,kod:"",stav:"bezKodu"});continue}
+    const p=P.get(kod);
+    if(!p){L.push({s,kod,stav:"nenalezeno"});continue}
+    const stejna=String(s.url||"").split("?")[0]===p.url;
+    L.push({s,kod,p,shoda:shodaNazvu(s.nazev,p.nazev),
+      stav:p.spor?"spor":!s.url?"doplnit":stejna?"shodna":"jina"});
+  }
+  const doplnit=L.filter(x=>x.stav==="doplnit");
+  const jine=L.filter(x=>x.stav==="jina");
+  const spory=L.filter(x=>x.stav==="spor");
+  const chybi=L.filter(x=>x.stav==="nenalezeno"||x.stav==="bezKodu");
+  if(!doplnit.length&&!jine.length){
+    toast("Z feedu není co doplnit — "+L.filter(x=>x.stav==="shodna").length+" sestav má URL už správně");
+    if(chybi.length)toast(chybi.length+" sestav se ve feedu nenašlo");
+    return;
+  }
+  urlCache=L;
+  const popis={doplnit:"doplní se",jina:"na e-shopu je jiná",shodna:"už sedí",
+    spor:"kód si odporuje",nenalezeno:"ve feedu není",bezKodu:"nemá kódy variant"};
+  const radek=(x,i)=>`<tr style="background:${x.stav==="doplnit"?"#F1FAF4":x.stav==="jina"?"#FFF8E1":x.stav==="spor"?"#FDECEA":"#FFFFFF"}">
+    <td class="r">${x.stav==="doplnit"||x.stav==="jina"
+      ? `<input type="checkbox" ${x.stav==="doplnit"?"checked":""} data-url="${i}" style="width:auto;cursor:pointer">`:""}</td>
+    <td><strong>${esc(x.s.nazev)}</strong>
+      ${x.p&&x.shoda<0.34?`<div class="band" style="background:#FDECEA;color:#8A2A1B;font-weight:700">názvy si neodpovídají — zkontroluj</div>`:""}
+      ${x.p?`<div class="muted" style="font-size:10.5px">${esc(x.p.nazev.slice(0,78))}</div>`:""}</td>
+    <td style="font-size:11.5px">${esc(x.kod||"—")}${x.p&&x.p.variant>1?` <span class="muted">· ${x.p.variant} variant</span>`:""}</td>
+    <td style="font-size:11px;word-break:break-all">${x.p?esc(x.p.url.replace(/^https?:\/\/(www\.)?/,"")):"—"}
+      ${x.stav==="jina"?`<div class="muted" style="font-size:10.5px">teď: ${esc(String(x.s.url||"").replace(/^https?:\/\/(www\.)?/,""))}</div>`:""}</td>
+    <td style="font-size:11.5px">${popis[x.stav]}</td></tr>`;
+  const poradi={doplnit:0,jina:1,spor:2,nenalezeno:3,bezKodu:4,shodna:5};
+  const serad=[...L].map((x,i)=>({x,i})).sort((a,b)=>poradi[a.x.stav]-poradi[b.x.stav]);
+  $("#mTitle").textContent=`URL z feedu — ${doplnit.length} k doplnění`;
+  $("#mBody").innerHTML=`
+    <p class="hint" style="margin:0 0 8px">Spárováno podle kódu produktu z kódů variant sestavy.
+      <strong>Projdi očima názvy</strong> — pod názvem sestavy je název produktu z feedu, aby bylo vidět,
+      že k sobě patří. Zapíše se jen to, co necháš zaškrtnuté.
+      ${spory.length?`<br><strong>${spory.length}</strong> ${spory.length===1?"produkt má":"produkty mají"} rozpor mezi kódem a obrázkem, ${spory.length===1?"ten se nezapíše":"ty se nezapíšou"}.`:""}
+      ${chybi.length?`<br><strong>${chibiText(chybi.length)}</strong>`:""}</p>
+    <table><thead><tr><th style="width:34px"></th><th>Sestava a produkt ve feedu</th>
+      <th style="width:70px">Kód</th><th>Adresa</th><th style="width:120px">Stav</th></tr></thead>
+      <tbody>${serad.map(({x,i})=>radek(x,i)).join("")}</tbody></table>
+    <div class="row" style="margin-top:10px;gap:8px">
+      <button class="btn btn-primary" id="urlOk">Zapsat zaškrtnuté</button>
+      <button class="btn" id="urlZrus">Zrušit</button></div>`;
+  $("#modal").hidden=false;
+}
+const chibiText=n=>n+(n===1?" sestava se ve feedu nenašla":n<5?" sestavy se ve feedu nenašly":" sestav se ve feedu nenašlo");
+function zapisUrlZFeedu(){
+  if(!urlCache){$("#modal").hidden=true;return}
+  let n=0;
+  for(const el of $("#mBody").querySelectorAll("[data-url]")){
+    if(!el.checked)continue;
+    const x=urlCache[+el.dataset.url]; if(!x||!x.p)continue;
+    x.s.url=x.p.url; n++;
+  }
+  urlCache=null; $("#modal").hidden=true;
+  if(n){renderSest();persist();toast("Doplněno URL u "+n+(n===1?" sestavy":n<5?" sestav":" sestav"))}
+  else toast("Nic zaškrtnuté, nic se nezapsalo");
 }
 function zobrazZmenyCen(){
   const L=zmenyCen();
@@ -4208,8 +4310,12 @@ function popisTydnu(){
 }
 /* ======== naskladnění + přepočet cen + dopad na sestavy (v74) ======== */
 let vseCache=null;
-/* komponenty, které se legitimně tahají zdarma z krabic jiných dílů */
-const ZDARMA_0=["AMD AM4 spony","AMD AM5 spony","16pin 12VHPWR","12v-2x6"];
+/* Komponenty s nulovou nákupní cenou právem — buď se tahají z krabic jiných
+   dílů (spony, adaptéry, boxové chladiče Wraith), nebo je Lukáš dostal zdarma
+   od dodavatele (rámečky ARION). Prodávají se normálně, takže celá prodejní
+   cena je marže — proto se u nich nehlásí chybějící cena ani se jimi nesmí
+   zastavit přepočet skladových cen a nacenění nabídky. */
+const ZDARMA_0=["AMD AM4 spony","AMD AM5 spony","16pin 12VHPWR","12v-2x6","ARION","Wraith"];
 const smiBytNula=n=>ZDARMA_0.some(z=>String(n||"").toLowerCase().includes(z.toLowerCase()));
 
 /* vážený průměr posledních dodaných kusů; ks lze podstrčit (simulace naskladnění) */
@@ -5649,6 +5755,11 @@ document.addEventListener("input",e=>{
     if(!["nazev","dod","modely","kodEshop"].includes(t.dataset.f)){renderSest();renderSur()}}}
   if(t.dataset.sk){const s=D.sestavy.find(x=>x.id===t.dataset.sk);if(s){s.kod=t.value;persist()}}
   if(t.dataset.sn){const s=D.sestavy.find(s=>s.id===t.dataset.sn);if(s){s.nazev=t.value;persist()}}
+  /* URL na e-shopu. Pole bylo v šabloně od v213, ale obsluha k němu nikdy
+     nebyla napsaná, takže se vložená adresa při dalším překreslení zahodila.
+     Zapisuje se bez renderSest(), jinak by se při psaní ztrácel kurzor —
+     dorovnání a odkaz ↗ se udělá až po opuštění pole (listener na change). */
+  if(t.dataset.su){const s=D.sestavy.find(x=>x.id===t.dataset.su);if(s){s.url=t.value;persist()}}
   if(t.dataset.prace){const s=D.sestavy.find(s=>s.id===t.dataset.prace);
     if(s){s.prace=t.value===""?null:Number(t.value);osvezVypocet(t,s);persist()}}
   if(t.dataset.marze){const s=D.sestavy.find(s=>s.id===t.dataset.marze);
@@ -5662,6 +5773,21 @@ document.addEventListener("input",e=>{
       p[f]=["nazev","eshop","param"].includes(f)?(t.value||(f==="nazev"?"":null)):(t.value===""?null:Number(t.value));
       if(!["nazev","eshop"].includes(f))osvezRadek(p,t.closest("tr"));
       persist()}}
+  /* Po opuštění pole URL: osekat mezery a doplnit https:// u adresy vlepené
+     bez protokolu (bestcomp.cz/…). Co na adresu nevypadá, se nechá být —
+     přepsat Lukášovi text na nesmysl je horší než ho nechat, jak ho napsal. */
+  if(t.dataset.su){
+    const s=D.sestavy.find(x=>x.id===t.dataset.su);
+    if(s){
+      let v=String(t.value||"").trim();
+      const jeAdresa=/^https?:\/\//i.test(v)||/^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/|$)/i.test(v);
+      if(jeAdresa){
+        v=v.replace(/\s+/g,"");                       // mezery z kopírování jen u adresy
+        if(!/^https?:\/\//i.test(v))v="https://"+v;
+      }
+      s.url=v; t.value=v; persist(); renderSest();
+    }
+    return}
   if(t.dataset.skp!==undefined){D.skrine.hodnoty[t.dataset.skp]=t.value===""?null:Number(t.value);renderSest();persist()}
   if(t.id==="skExtra"){D.skrine.extra.castka=Number(t.value);renderSest();persist()}
   if(t.id==="skDesky"){D.skrine.extra.desky=t.value;renderSest();persist()}
@@ -5689,6 +5815,13 @@ document.addEventListener("DOMContentLoaded",()=>{
     const rd=new FileReader();
     rd.onload=()=>{nactiCenyZEshopu(rd.result); f.value=""};
     rd.readAsText(x,"utf-8");
+  });
+  const u=$("#urlFile");
+  if(u)u.addEventListener("change",()=>{
+    const x=u.files[0]; if(!x)return;
+    const rd=new FileReader();
+    rd.onload=()=>{nactiUrlZFeedu(rd.result); u.value=""};
+    rd.readAsText(x,"utf-8");          // feed je v UTF-8, na rozdíl od CSV ze Shoptetu
   });
 });
 document.addEventListener("DOMContentLoaded",()=>{
@@ -6205,6 +6338,9 @@ document.addEventListener("click",e=>{
   if(t.id==="odpZrus"){$("#modal").hidden=true}
   if(t.id==="odpOk"){provedOdpis()}
   if(t.id==="impCeny"){$("#cenyFile").click()}
+  if(t.id==="impUrl"){$("#urlFile").click();return}
+  if(t.id==="urlOk"){zapisUrlZFeedu();return}
+  if(t.id==="urlZrus"){urlCache=null;$("#modal").hidden=true;return}
   if(t.id==="lvlZrus"){$("#modal").hidden=true;lvlCache=null}
   if(t.id==="lvlOk"&&lvlCache){
     const{zm,KAT}=lvlCache;
