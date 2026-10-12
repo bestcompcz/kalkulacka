@@ -1380,7 +1380,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=235;
+const VERZE=236;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3163,8 +3163,15 @@ function prepocetZeNakupu(){
    a výsledek se dá ověřit: musí dělit na haléře přesně a nesmí se od ceny ve
    sloupci lišit o víc než 15 %. Co tím neprojde, se označí jako nepřečtené. */
 const FAKT_SAZBY=[21,12,15,0];
-const FAKT_RADEK=/^\s*(\d{6,})\s+(?=\D)/;
+/* Kód položky od čtyř číslic — Balné má u ATC kód 62900 a při hranici šesti
+   číslic se vcucl do předchozího řádku jako pokračování názvu. Hlavička
+   faktury se tím nerozbije: čísla jako 21818002 nebo 27013130 stojí na řádku
+   sama a nemají za sebou text, 093-029007 nemá za číslem mezeru. */
+const FAKT_RADEK=/^\s*(\d{4,})\s+(?=\D)/;
 const FAKT_PART=/^\s*([A-Za-z0-9][A-Za-z0-9._\/-]{3,})\s+([\d\s\u00a0.,]+)$/;
+/* Konec rozpisu. Bez tohohle se patička („67 355,60", „Celkem", „Ceny jsou
+   uvedeny v CZK.") přilepila jako pokračování názvu posledního řádku. */
+const FAKT_KONEC=/^(celkem|sazba\s+dph|[čc][áa]stka\s+dph|ceny\s+jsou|na\s+polo[žz]ky|zbo[žz][íi]\s+je|spole[čc]nosti|[\d\s\u00a0.,%]+)$/i;
 const fcis=s=>{const v=Number(String(s).replace(/[\s\u00a0]/g,"").replace(",","."));return isFinite(v)?v:0};
 function jeFakturaRadkova(txt){
   return String(txt||"").split(/\r?\n/).filter(x=>FAKT_RADEK.test(x)).length>=2;
@@ -3212,16 +3219,41 @@ function faktRadek(kod,tail){
   return {kod,popis,ks,cena:nej.jedn,zaklad,celkem:nej.celkem,
     poplatek:Math.round((nej.jedn-zaklad)*100)/100};
 }
+/* Z celé faktury vytáhne číslo dokladu, datum vystavení a součty.
+   Součty se pak porovnají s tím, co se přečetlo z řádků — to je kontrola,
+   která odhalí spolknutý nebo přeskočený řádek. */
+function faktHlavicka(txt){
+  const s=String(txt||"");
+  const out={cislo:"",datum:"",zaklad:null,dph:null,celkem:null,rp:null};
+  const mc=s.match(/dokladu?\s*(?:[čc]\.?)?\s*:?\s*([A-Z]{1,3}\d{5,}[A-Z0-9/-]*)/i);
+  if(mc)out.cislo=mc[1];
+  const md=s.match(/datum\s+vystaven[íi]\s*:?\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})/i);
+  if(md){let rok=+md[3]; if(rok<100)rok+=2000;
+    out.datum=rok+"-"+String(+md[2]).padStart(2,"0")+"-"+String(+md[1]).padStart(2,"0")}
+  const N="([0-9][0-9 \u00a0]*,[0-9]{2})";
+  const re=new RegExp("(?:^|\n)[ \t]*(?:celkem|[0-9]{1,2}[ ]*%)[ \t]+"+N+"[ \t]+"+N+"[ \t]+"+N,"gi");
+  let m,posl=null; while((m=re.exec(s)))posl=m;
+  if(posl){const a=fcis(posl[1]),b=fcis(posl[2]),c=fcis(posl[3]);
+    if(Math.abs(a+b-c)<0.05){out.zaklad=a;out.dph=b;out.celkem=c}}
+  const mr=s.match(/recykla[čc]n[íi] p[řr][íi]sp[ěe]vek[^0-9]{0,24}([0-9][0-9 \u00a0]*,[0-9]{2})/i);
+  if(mr)out.rp=fcis(mr[1]);
+  return out;
+}
 function rozeberFakturuRadky(txt){
   const out=[]; let cur=null;
   const uzavri=()=>{if(cur){out.push(cur);cur=null}};
   for(const raw of String(txt||"").split(/\r?\n/)){
     const l=raw.trim(); if(!l)continue;
     const m=l.match(FAKT_RADEK);
-    if(m){uzavri();
-      cur=faktRadek(m[1],l.slice(m[0].length))
-        ||{kod:m[1],popis:l.slice(m[0].length).trim(),ks:null,cena:null,nelze:true};
+    if(m){
+      const r=faktRadek(m[1],l.slice(m[0].length));
+      /* Když se řádek nedá přečíst a není v něm ani desetinné číslo, není to
+         položka, ale šum z hlavičky — ten se nesmí stát prázdnou položkou. */
+      if(!r&&!/\d,\d/.test(l)){ if(cur)cur.popis=(cur.popis+" "+l).trim(); continue }
+      uzavri();
+      cur=r||{kod:m[1],popis:l.slice(m[0].length).trim(),ks:null,cena:null,nelze:true};
       continue}
+    if(FAKT_KONEC.test(l)){uzavri();continue}
     if(!cur)continue;
     const p=l.match(FAKT_PART);
     if(p&&!/[a-záčďéěíňóřšťúůýž]{3}/i.test(p[2])){cur.part=p[1];continue}
@@ -3230,7 +3262,9 @@ function rozeberFakturuRadky(txt){
   uzavri();
   for(const x of out)x.komp=(x.nelze?null:(komponentaZPopisu(x.popis)||{}).id)||null;
   /* Faktura je vždy bez DPH — sazba je na řádku zvlášť. */
-  out.meta={zaklad:null,dph:null,celkem:null,poplatky:0,poplatkyPopis:[],bezDph:true};
+  const hl=faktHlavicka(txt);
+  out.meta={zaklad:hl.zaklad,dph:null,celkem:hl.celkem,poplatky:0,poplatkyPopis:[],
+    bezDph:true,hlavicka:hl};
   return out;
 }
 /* ======== párování faktury na objednané nákupy ======== */
@@ -3267,7 +3301,9 @@ function naparujFakturu(pol,dodavatel,bezDph,datum){
     &&(!dod||dodavKlic(n.dodavatel)===dodavKlic(dod))
     &&(Number(n.fakt)||0)<(Number(n.ks)||0));
   const pouzite=new Set();
-  return pol.map(x=>{
+  /* pol.map() vyrobí nové pole a .meta (hlavička faktury se součty) by se
+     ztratilo — náhled by pak neměl s čím porovnávat. */
+  const vysl=pol.map(x=>{
     const cena=bezDph?naDph(x.cena):x.cena;
     const kompId=x.komp;
     let nej=null,nejS=0;
@@ -3295,6 +3331,8 @@ function naparujFakturu(pol,dodavatel,bezDph,datum){
     if(nej&&nejS>=1.2)pouzite.add(nej.id);
     return {...x,cena,nakup:nejS>=1.2?nej:null,skore:nejS};
   });
+  vysl.meta=pol.meta;
+  return vysl;
 }
 function zobrazFakturuNahled(pol,cislo,bezDph){
   fakturaCache={pol,cislo,bezDph};
@@ -3305,6 +3343,13 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
      ceny. Ověřeno: druhé vložení stejné faktury orazítkovalo pět cizích
      nákupů. Proto se shodné číslo faktury hlásí a zápis chce potvrzení. */
   const jiz=cislo?D.nakupy.filter(n=>String(n.faktCislo||"")===String(cislo)):[];
+  /* Kontrola proti součtům z faktury. Řádky se čtou bez DPH, takže se
+     porovnává základ. Odhalí spolknutý řádek — přesně to se stalo s Balným. */
+  const HLV=(pol.meta||{}).hlavicka||{};
+  const bezDphSoucet=Math.round(pol.reduce((a,x)=>a+(Number(x.celkem)||0),0)*100)/100;
+  const rpSoucet=Math.round(pol.reduce((a,x)=>a+(Number(x.poplatek)||0)*(Number(x.ks)||0),0)*100)/100;
+  const sedi=HLV.zaklad!=null&&Math.abs(bezDphSoucet-HLV.zaklad)<0.02;
+  const rpSedi=HLV.rp!=null&&Math.abs(rpSoucet-HLV.rp)<0.02;
   $("#mTitle").textContent=`Faktura ${cislo||""} — ${nalezeno} z ${pol.length} napárováno`;
   $("#mBody").innerHTML=`
     ${jiz.length?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
@@ -3312,6 +3357,12 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
       ${jiz.length===1?"nákupu":jiz.length<5?"nákupů":"nákupů"}. Vložit ji znovu nedává smysl —
       ty nákupy už mají vyfakturováno všechno, takže se párování chytí jiných, starších nákupů
       se stejným názvem a přepíše jim ceny. Zkontroluj sloupec „Napárováno na nákup“ a datumy.</div>`:""}
+    ${HLV.zaklad!=null?`<div style="background:${sedi?"#F1FAF4":"#FDECEA"};border:1px solid ${sedi?"#BFE6CE":"#F0C4BE"};border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
+      <strong>${sedi?"Součet řádků souhlasí s fakturou":"Součet řádků nesouhlasí s fakturou"}</strong> —
+      z řádků ${kc(bezDphSoucet)} bez DPH, faktura hlásí ${kc(HLV.zaklad)}${
+        sedi?"":` <strong>rozdíl ${kc(bezDphSoucet-HLV.zaklad)}</strong>, takže se některý řádek nepřečetl`}.
+      ${HLV.rp!=null?`<br>Recyklační příspěvek z řádků ${kc(rpSoucet)}, faktura hlásí ${kc(HLV.rp)}${rpSedi?" — souhlasí":" — <strong>nesouhlasí</strong>"}.`:""}
+      ${HLV.celkem!=null?`<br><span class="muted">Faktura celkem s DPH ${kc(HLV.celkem)}.</span>`:""}</div>`:""}
     ${!cislo?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
       <strong>Bez čísla faktury</strong> se nedá poznat, že už byla vložená. Vrať se a doplň ho.</div>`:""}
     <div class="tbl"><table><thead><tr><th>Z faktury</th><th style="width:26%">Napárováno na nákup</th>
@@ -3325,7 +3376,8 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
         ${x.nelze?`<div class="band" style="background:#FDECEA;color:#8A2A1B;font-weight:700">řádek se nepodařilo přečíst</div>`:""}
         ${x.part||x.poplatek?`<div class="muted" style="font-size:10.5px">${x.part?esc(x.part):""}${x.part&&x.poplatek?" · ":""}${x.poplatek?"recyklační poplatek "+kc(x.poplatek)+"/ks":""}</div>`:""}</td>
       <td style="font-size:11.5px">${n?`${esc(n.popis||"")}<div class="muted" style="font-size:10.5px">${esc(n.datum||"")} · ${esc(n.dodavatel||"")}</div>`
-        :`<span class="band" style="background:#C0392B;color:#fff;font-weight:700">nenalezeno</span>`}</td>
+        :`<span class="band" style="background:${sluzbaBezNakupu(x.popis)?"#E0B740":"#C0392B"};color:${sluzbaBezNakupu(x.popis)?"#3A2E00":"#fff"};font-weight:700">${
+            sluzbaBezNakupu(x.popis)?"služba — nepáruje se":"nenalezeno"}</span>`}</td>
       <td class="r num">${n?(n.ks??""):"—"}</td>
       <td class="r"><input type="number" class="px" value="${x.ks??""}" data-fi="${i}" data-ff="ks" ${n?"":"disabled"}></td>
       <td class="r num">${n?kc(stara):"—"}</td>
@@ -3970,7 +4022,7 @@ function vypadaJakoPC(t){
   return PC_SLABE.test(s);
 }
 /* Služba nebo úkon, u kterého je nulový nákup správně — nezastavuje výpočet. */
-const PC_SLUZBA=/po[šs]tovn|doprav|dod[áa]n[íi]|balen|z[áa]bal|instalac|servis|pr[áa]ce|mont[áa][žz]|diagnostik|[čc]i[šs]t[ěe]n|sleva|p[řr][íi]platek|poukaz|z[áa]ruka|prodlou[žz]en/i;
+const PC_SLUZBA=/po[šs]tovn|doprav|dod[áa]n[íi]|baln|z[áa]bal|instalac|servis|pr[áa]ce|mont[áa][žz]|diagnostik|[čc]i[šs]t[ěe]n|sleva|p[řr][íi]platek|poukaz|z[áa]ruka|prodlou[žz]en/i;
 const sluzbaBezNakupu=t=>PC_SLUZBA.test(String(t||""));
 /* Záložní marže na počítač bez nákupní ceny, bez DPH. */
 function marzeNahrady(){ const v=Number((D.nastaveni||{}).marzeNahrada); return v>0?v:3000 }
@@ -6555,9 +6607,17 @@ document.addEventListener("click",e=>{
   if(t.id==="nkFaktura"){zobrazFakturu();return}
   if(t.id==="faktZrus"){fakturaCache=null;$("#modal").hidden=true;return}
   if(t.id==="faktParuj"){
-    const txt=$("#faktText").value, cislo=$("#faktCislo").value.trim(), dod=$("#faktDodavatel").value.trim();
+    const txt=$("#faktText").value, dod=$("#faktDodavatel").value.trim();
+    let cislo=$("#faktCislo").value.trim();
     const pol=jeFakturaRadkova(txt)?rozeberFakturuRadky(txt):rozeberKosik(txt);
     if(!pol.length){toast("Z textu se nepodařilo nic vyčíst");return}
+    /* Číslo dokladu a datum vystavení se dají přečíst z faktury, takže se
+       nemusí opisovat. Co Lukáš vyplnil ručně, se nepřepisuje. */
+    const HL=(pol.meta||{}).hlavicka;
+    if(HL){
+      if(!cislo&&HL.cislo){cislo=HL.cislo; $("#faktCislo").value=cislo}
+      if(HL.datum&&$("#faktDatum"))$("#faktDatum").value=HL.datum;
+    }
     const nelze=pol.filter(x=>x.nelze);
     if(nelze.length)toast(nelze.length+(nelze.length===1?" řádek se nepodařilo přečíst":" řádky se nepodařilo přečíst"));
     const M=pol.meta;
