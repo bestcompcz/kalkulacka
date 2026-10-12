@@ -718,6 +718,12 @@ tr.unused td{background:#FEFCFB}
         <tr><td>Záložní marže na PC</td><td class="r"><input type="number" id="cNahr" step="100" min="0" class="px"></td><td class="muted">Kč bez DPH &mdash; použije se, když se u prodaného počítače nenajde nákupní cena</td></tr>
       </tbody></table></div>
     </div>
+
+    <div class="card block">
+      <header><span class="rail" style="--k:var(--misc)"></span><h3>Naučená párování</h3></header>
+      <p class="hint" style="padding:8px 12px 0;margin:0">Když u nákupu z košíku ručně vybereš komponentu, kalkulačka si popis od dodavatele zapamatuje a příště ho napáruje sama. Když se spletla, tady se to dá zrušit &mdash; jinak chybu opakuje u každé další dodávky.</p>
+      <div id="parSeznam" style="padding:8px 12px 12px"></div>
+    </div>
   </div>
 </section>
 
@@ -1374,7 +1380,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=233;
+const VERZE=235;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3144,6 +3150,89 @@ function prepocetZeNakupu(){
 
 
 
+/* ======== rozpis faktury po řádcích (v234) ========
+   Faktura od ATC má na jednom řádku všechno: kód, název, počet kusů, cenu bez
+   DPH, sazbu, recyklační poplatek a celkem. Pokračování názvu je na dalších
+   řádcích, part number s poplatkem až za nimi. rozeberKosik() je postavený na
+   košík dodavatele (název na jednom řádku, cena na jiném) a tenhle formát
+   rozsype — z pěti položek udělal tři, slepil názvy a vzal celkovou částku
+   jako cenu za kus.
+
+   Cena za kus se NEBERE ze sloupce s cenou, ale jako celkem/ks. Tím se
+   automaticky dostane do ceny i recyklační poplatek, který Lukáš reálně platí,
+   a výsledek se dá ověřit: musí dělit na haléře přesně a nesmí se od ceny ve
+   sloupci lišit o víc než 15 %. Co tím neprojde, se označí jako nepřečtené. */
+const FAKT_SAZBY=[21,12,15,0];
+const FAKT_RADEK=/^\s*(\d{6,})\s+(?=\D)/;
+const FAKT_PART=/^\s*([A-Za-z0-9][A-Za-z0-9._\/-]{3,})\s+([\d\s\u00a0.,]+)$/;
+const fcis=s=>{const v=Number(String(s).replace(/[\s\u00a0]/g,"").replace(",","."));return isFinite(v)?v:0};
+function jeFakturaRadkova(txt){
+  return String(txt||"").split(/\r?\n/).filter(x=>FAKT_RADEK.test(x)).length>=2;
+}
+/* Mezera v „9 637,50" je oddělovač tisíců, v „30 320,25" oddělovač položek.
+   Rozhodnout se to nedá, tak se vyrobí všechna čtení a vybere to, které
+   arimeticky vyjde. */
+function faktCteni(za){
+  const out=[];
+  (function rek(i,acc){
+    if(i>=za.length){if(acc.length)out.push(acc.slice());return}
+    const t=za[i];
+    if(/^[\d.,]+$/.test(t))rek(i+1,acc.concat(fcis(t)));
+    if(i+1<za.length&&/^\d{1,3}$/.test(t)&&/^\d{3}(,\d+)?$/.test(za[i+1]))
+      rek(i+2,acc.concat(fcis(t+za[i+1])));
+  })(0,[]);
+  return out;
+}
+function faktRadek(kod,tail){
+  const tok=tail.split(/\s+/).filter(Boolean);
+  let vi=-1;
+  for(let i=1;i<tok.length;i++){
+    if(!/^\d{1,2}$/.test(tok[i])||!FAKT_SAZBY.includes(+tok[i]))continue;
+    if(!tok.slice(0,i).some(x=>/,\d/.test(x)))continue;
+    vi=i;break;
+  }
+  if(vi<0)return null;
+  const pred=tok.slice(0,vi), za=tok.slice(vi+1);
+  let ui=-1; for(let i=pred.length-1;i>=0;i--)if(/^\d[\d\s\u00a0]*,\d+$/.test(pred[i])){ui=i;break}
+  if(ui<1)return null;
+  const zaklad=fcis(pred[ui]);
+  let qi=ui-1; if(/^ks$/i.test(pred[qi]||""))qi--;
+  if(qi<0||!/^\d+$/.test(pred[qi]))return null;
+  const ks=+pred[qi]; if(!(ks>0)||!(zaklad>0))return null;
+  const popis=pred.slice(0,qi).join(" ").replace(/[,;]\s*$/,"").trim();
+  let nej=null;
+  for(const c of faktCteni(za)){
+    const celkem=c[c.length-1]; if(!(celkem>0))continue;
+    const jedn=Math.round(celkem/ks*100)/100;
+    if(Math.abs(jedn*ks-celkem)>0.005)continue;
+    const odch=Math.abs(jedn-zaklad)/zaklad; if(odch>0.15)continue;
+    if(!nej||odch<nej.odch)nej={celkem,jedn,odch};
+  }
+  if(!nej)return null;
+  return {kod,popis,ks,cena:nej.jedn,zaklad,celkem:nej.celkem,
+    poplatek:Math.round((nej.jedn-zaklad)*100)/100};
+}
+function rozeberFakturuRadky(txt){
+  const out=[]; let cur=null;
+  const uzavri=()=>{if(cur){out.push(cur);cur=null}};
+  for(const raw of String(txt||"").split(/\r?\n/)){
+    const l=raw.trim(); if(!l)continue;
+    const m=l.match(FAKT_RADEK);
+    if(m){uzavri();
+      cur=faktRadek(m[1],l.slice(m[0].length))
+        ||{kod:m[1],popis:l.slice(m[0].length).trim(),ks:null,cena:null,nelze:true};
+      continue}
+    if(!cur)continue;
+    const p=l.match(FAKT_PART);
+    if(p&&!/[a-záčďéěíňóřšťúůýž]{3}/i.test(p[2])){cur.part=p[1];continue}
+    cur.popis=((cur.popis||"")+" "+l).replace(/\s{2,}/g," ").trim();
+  }
+  uzavri();
+  for(const x of out)x.komp=(x.nelze?null:(komponentaZPopisu(x.popis)||{}).id)||null;
+  /* Faktura je vždy bez DPH — sazba je na řádku zvlášť. */
+  out.meta={zaklad:null,dph:null,celkem:null,poplatky:0,poplatkyPopis:[],bezDph:true};
+  return out;
+}
 /* ======== párování faktury na objednané nákupy ======== */
 let fakturaCache=null;
 function zobrazFakturu(){
@@ -3154,15 +3243,25 @@ function zobrazFakturu(){
     <div class="row" style="gap:10px;margin-bottom:8px">
       <input type="text" id="faktCislo" placeholder="číslo faktury" style="max-width:190px">
       <input type="text" id="faktDodavatel" placeholder="dodavatel, např. atc" style="max-width:170px">
+      <span style="font-size:12.5px;font-weight:600">datum</span>
+      <input type="date" id="faktDatum" style="max-width:150px;font-size:12.5px"
+        title="Podle data se rozhoduje mezi stejnými nákupy od téhož dodavatele">
     </div>
     <textarea id="faktText" rows="9" placeholder="rozpis faktury i se součty" style="width:100%;font-family:var(--mono);font-size:12px"></textarea>
     <div class="row" style="gap:8px;margin-top:10px;justify-content:flex-end">
       <button class="btn btn-sm" id="faktZrus">Zrušit</button>
       <button class="btn btn-sm btn-primary" id="faktParuj">Napárovat</button></div>`;
   modalKomp=null; $("#modal").hidden=false;
+  const dd=$("#faktDatum"); if(dd)dd.value=dnesLokalne();
+}
+/* Datum z místního kalendáře, ne přes toISOString — ten bere UTC a po půlnoci
+   by nabídl předchozí den. */
+function dnesLokalne(){
+  const d=new Date();
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
 /* ke každé položce faktury najde nejlepší otevřený nákup od téhož dodavatele */
-function naparujFakturu(pol,dodavatel,bezDph){
+function naparujFakturu(pol,dodavatel,bezDph,datum){
   const dod=(dodavatel||"").trim().toLowerCase();
   const otevrene=D.nakupy.filter(n=>!n.vyber&&!n.vratka
     &&(!dod||dodavKlic(n.dodavatel)===dodavKlic(dod))
@@ -3176,10 +3275,21 @@ function naparujFakturu(pol,dodavatel,bezDph){
       if(pouzite.has(n.id))continue;
       let sk=0;
       if(kompId&&n.komp===kompId)sk+=2;
+      /* Part number z faktury v názvu nákupu je silnější signál než slova. */
+      if(x.part&&norm3(n.popis).includes(norm3(x.part)))sk+=2;
       const a=norm3(n.popis).split(" "), b=norm3(x.popis).split(" ");
       const spol=b.filter(w=>a.includes(w)).length/Math.max(b.length,1);
       sk+=spol*2;
-      if((Number(n.ks)||0)===(x.ks||0))sk+=0.5;
+      /* Shodný počet kusů je na faktuře silný signál — dodavatel fakturuje
+         přesně to, co dodal. Dřív vážil 0,5 a prohrával s podobností názvu:
+         faktura na 30 ks z 12. 10. se napárovala na starší nákup 50 ks
+         ze 17. 8., který měl v názvu stejná slova. */
+      if((Number(n.ks)||0)===(x.ks||0))sk+=1;
+      /* Blízkost datumu. Faktura pokrývá dodávku, ne nákup z jiného čtvrtletí. */
+      if(datum&&n.datum){
+        const dny=Math.abs(Date.parse(String(n.datum)+"T00:00:00Z")-Date.parse(datum+"T00:00:00Z"))/86400000;
+        if(isFinite(dny))sk+=Math.max(0,1-Math.min(1,dny/45));
+      }
       if(sk>nejS){nejS=sk;nej=n}
     }
     if(nej&&nejS>=1.2)pouzite.add(nej.id);
@@ -3189,8 +3299,21 @@ function naparujFakturu(pol,dodavatel,bezDph){
 function zobrazFakturuNahled(pol,cislo,bezDph){
   fakturaCache={pol,cislo,bezDph};
   const nalezeno=pol.filter(x=>x.nakup).length;
+  /* Dvojí vložení téže faktury je nebezpečné: nákupy z první dávky už mají
+     vyfakturováno všechno, takže se do nich netrefí a párování si najde jiné,
+     starší nákupy se stejným názvem a stejným počtem kusů — a přepíše jim
+     ceny. Ověřeno: druhé vložení stejné faktury orazítkovalo pět cizích
+     nákupů. Proto se shodné číslo faktury hlásí a zápis chce potvrzení. */
+  const jiz=cislo?D.nakupy.filter(n=>String(n.faktCislo||"")===String(cislo)):[];
   $("#mTitle").textContent=`Faktura ${cislo||""} — ${nalezeno} z ${pol.length} napárováno`;
   $("#mBody").innerHTML=`
+    ${jiz.length?`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
+      <strong>Faktura ${esc(cislo)} už je vložená</strong> u ${jiz.length}
+      ${jiz.length===1?"nákupu":jiz.length<5?"nákupů":"nákupů"}. Vložit ji znovu nedává smysl —
+      ty nákupy už mají vyfakturováno všechno, takže se párování chytí jiných, starších nákupů
+      se stejným názvem a přepíše jim ceny. Zkontroluj sloupec „Napárováno na nákup“ a datumy.</div>`:""}
+    ${!cislo?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
+      <strong>Bez čísla faktury</strong> se nedá poznat, že už byla vložená. Vrať se a doplň ho.</div>`:""}
     <div class="tbl"><table><thead><tr><th>Z faktury</th><th style="width:26%">Napárováno na nákup</th>
       <th class="r" style="width:64px">Obj.</th><th class="r" style="width:64px">Fakt.</th>
       <th class="r" style="width:96px">Cena obj.</th><th class="r" style="width:96px">Cena fakt.</th>
@@ -3198,7 +3321,9 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
     ${pol.map((x,i)=>{
       const n=x.nakup, stara=n?Number(n.cena)||0:null, rozdil=n?(x.cena||0)-stara:0;
       return `<tr style="background:${n?"#DDF3E6":"#FDE7E4"};box-shadow:inset 4px 0 0 ${n?"#1B8A57":"#C0392B"}">
-      <td style="font-size:11.5px">${esc(x.popis)}</td>
+      <td style="font-size:11.5px">${esc(x.popis)}
+        ${x.nelze?`<div class="band" style="background:#FDECEA;color:#8A2A1B;font-weight:700">řádek se nepodařilo přečíst</div>`:""}
+        ${x.part||x.poplatek?`<div class="muted" style="font-size:10.5px">${x.part?esc(x.part):""}${x.part&&x.poplatek?" · ":""}${x.poplatek?"recyklační poplatek "+kc(x.poplatek)+"/ks":""}</div>`:""}</td>
       <td style="font-size:11.5px">${n?`${esc(n.popis||"")}<div class="muted" style="font-size:10.5px">${esc(n.datum||"")} · ${esc(n.dodavatel||"")}</div>`
         :`<span class="band" style="background:#C0392B;color:#fff;font-weight:700">nenalezeno</span>`}</td>
       <td class="r num">${n?(n.ks??""):"—"}</td>
@@ -3212,7 +3337,8 @@ function zobrazFakturuNahled(pol,cislo,bezDph){
       jen část kusů a cena se liší, nákup se rozdělí na vyfakturovanou část a zbytek.</p>
     <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="btn btn-sm" id="faktZrus">Zrušit</button>
-      <button class="btn btn-sm btn-primary" id="faktOk">Zapsat ${nalezeno} položek</button></div>`;
+      <button class="btn btn-sm btn-primary" id="faktOk" ${jiz.length?'data-znovu="1"':""}>${
+        jiz.length?"Vložit znovu i tak":"Zapsat "+nalezeno+" položek"}</button></div>`;
   $("#modal").hidden=false;
 }
 function provedFakturu(){
@@ -5589,6 +5715,19 @@ function renderSklad(){
     <div><div class="muted" style="font-size:11.5px">Dochází</div><div class="price" style="font-size:20px;color:${doch?"var(--signal)":"var(--ok)"}">${doch}</div></div>
     <div><div class="muted" style="font-size:11.5px">Kritické</div><div class="price" style="font-size:20px;color:${krit?"var(--bad)":"var(--ok)"}">${krit}</div></div>`;
 }
+function renderParovani(){
+  const el=$("#parSeznam"); if(!el)return;
+  const P=D.parovani||{}, kl=Object.keys(P).sort();
+  if(!kl.length){el.innerHTML=`<p class="hint" style="margin:0">Nic naučeného.</p>`;return}
+  el.innerHTML=`<div class="tbl"><table><thead><tr><th>Popis od dodavatele</th>
+    <th style="width:38%">Napáruje se na</th><th style="width:30px"></th></tr></thead><tbody>
+    ${kl.map(k=>{const komp=najdiKomp(P[k]);
+      return `<tr${komp?"":' style="background:#FFF8E1"'}><td style="font-size:11.5px">${esc(k)}</td>
+      <td style="font-size:11.5px">${komp?esc(katKomp(P[k])+" / "+komp.nazev)
+        :`<span class="band" style="background:#E0B740;color:#3A2E00;font-weight:700">komponenta už neexistuje</span>`}</td>
+      <td class="r"><button class="x" data-delpar="${esc(k)}" title="Zrušit naučené párování">×</button></td></tr>`}).join("")}
+    </tbody></table></div>`;
+}
 function renderNast(){
   const S=D.komponenty["Skříň"]||[];
   $("#skrBody").innerHTML=S.map(k=>`<tr>
@@ -5628,7 +5767,7 @@ function renderNast(){
      <td class="r"><button class="icon-x" data-delwifi="${i}">×</button></td></tr>`).join("");}
   $("#cVat").value=D.nastaveni.vat; $("#cWork").value=D.nastaveni.prace;
   $("#cWin").value=D.nastaveni.windows; $("#cOkno").value=(Number(D.nastaveni.oknoCen)||90);
-  $("#cNahr").value=(Number(D.nastaveni.marzeNahrada)||3000); 
+  $("#cNahr").value=(Number(D.nastaveni.marzeNahrada)||3000); renderParovani(); 
 }
 /* Křížek svítí jen u pole, ve kterém něco je. */
 function osvezKrizky(){
@@ -6074,6 +6213,12 @@ document.addEventListener("click",e=>{
     vyCsv=null;vyMinulyTyden(t.id==="vyPredminuly"?2:1);renderVyhodnoceni();return}
   if(t.id==="vyArchiv"){vyhodnotZArchivu();return}
   if(t.id==="hiCsv"){hiCsv();return}
+  if(t.dataset.delpar!==undefined){
+    const k=t.dataset.delpar, komp=najdiKomp((D.parovani||{})[k]);
+    if(confirm("Zrušit naučené párování?\n\n"+k+"\n→ "+(komp?komp.nazev:"neexistující komponenta")
+      +"\n\nPříště se tenhle popis bude párovat znovu podle názvu.")){
+      delete D.parovani[k]; persist(); renderParovani(); toast("Párování zrušeno")}
+    return}
   if(t.id==="cenikGen"){
     if((D.cloud||{}).cenikKdy&&!confirm(
       "Vygenerovat nové heslo k šifrování ceníku?\n\n"
@@ -6411,12 +6556,18 @@ document.addEventListener("click",e=>{
   if(t.id==="faktZrus"){fakturaCache=null;$("#modal").hidden=true;return}
   if(t.id==="faktParuj"){
     const txt=$("#faktText").value, cislo=$("#faktCislo").value.trim(), dod=$("#faktDodavatel").value.trim();
-    const pol=rozeberKosik(txt);
+    const pol=jeFakturaRadkova(txt)?rozeberFakturuRadky(txt):rozeberKosik(txt);
     if(!pol.length){toast("Z textu se nepodařilo nic vyčíst");return}
+    const nelze=pol.filter(x=>x.nelze);
+    if(nelze.length)toast(nelze.length+(nelze.length===1?" řádek se nepodařilo přečíst":" řádky se nepodařilo přečíst"));
     const M=pol.meta;
-    const bez=(M&&M.dph>0)||(D.bezDph||[]).includes(dodavKlic(dod));
-    zobrazFakturuNahled(naparujFakturu(pol,dod,bez),cislo,bez);return}
+    const bez=(M&&(M.bezDph||M.dph>0))||(D.bezDph||[]).includes(dodavKlic(dod));
+    const datum=($("#faktDatum")||{}).value||dnesLokalne();
+    zobrazFakturuNahled(naparujFakturu(pol,dod,bez,datum),cislo,bez);return}
   if(t.id==="faktOk"){
+    if(t.dataset.znovu&&!confirm("Tahle faktura už je v datech vložená.\n\n"
+      +"Druhé vložení přepíše ceny u jiných, starších nákupů se stejným názvem.\n\n"
+      +"Opravdu zapsat?"))return;
     const n=provedFakturu(); fakturaCache=null; $("#modal").hidden=true;
     renderNakupy(); persist(); toast(n+" položek vyfakturováno");return}
   if(t.id==="nkHromadne"){zobrazKosik();return}
