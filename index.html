@@ -819,6 +819,12 @@ const MAPA_DEF={"CPU":"Výměna procesoru","RAM":"Rozšířit pamět RAM","SSD":
 function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.bezDph))d.bezDph=["atc","atcomp","asbis","100mega"];   // uvádějí ceny bez DPH
   if(!d.parovani||typeof d.parovani!=="object")d.parovani={};  // naučené dvojice popis → komponenta
+  /* Dřív se klíč ukládal bez sjednotNazev, takže "amd ryzen 5 9600x" se nikdy
+     nenašlo (hledá se pod "r 5 9600 x"). Překlíčujeme to. */
+  for(const k of Object.keys(d.parovani)){
+    const nk=norm3(sjednotNazev(k));
+    if(nk&&nk!==k){ if(!d.parovani[nk])d.parovani[nk]=d.parovani[k]; delete d.parovani[k] }
+  }
   if(!Array.isArray(d.cenaZaKus))d.cenaZaKus=["mironet"];      // uvádějí cenu za kus, ne za položku
   /* Smarty uvádí u položky jednotkovou cenu stejně jako Mironet. Doplní se jednorázově
      i do dat, která vznikla dřív — příznak brání tomu vracet to po ručním odškrtnutí. */
@@ -1380,7 +1386,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=236;
+const VERZE=238;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3222,9 +3228,23 @@ function faktRadek(kod,tail){
 /* Z celé faktury vytáhne číslo dokladu, datum vystavení a součty.
    Součty se pak porovnají s tím, co se přečetlo z řádků — to je kontrola,
    která odhalí spolknutý nebo přeskočený řádek. */
+/* Dodavatel se pozná z hlavičky faktury. Párovat fakturu na nákupy od jiného
+   dodavatele nesmí jít — faktura ATC patří k nákupům z ATC. */
+const FAKT_DODAV=[[/\bat\s*computers\b|\b61672599\b/i,"atc"],[/\balza\.cz\b|\balza\s+a\.?\s?s\.?/i,"alza"],
+  [/\bmironet\b/i,"mironet"],[/\bsmarty\b/i,"smarty"],[/\bczc\.cz\b/i,"czc"],[/\bts\s*bohemia\b/i,"tsbohemia"],
+  [/\b100mega\b/i,"100mega"],[/\basbis\b/i,"asbis"],[/\bdatart\b/i,"datart"],[/electro\s*world/i,"ed"],
+  [/\btonerpartner\b/i,"tonerpartner"]];
+/* Tentýž dodavatel pod dvěma štítky. Nákupy z "atcomp" jsou taky z ATC. */
+const DODAV_ALIAS={atcomp:"atc",alzabox:"alza"};
+const dodavSjednot=x=>{const k=dodavKlic(x);return DODAV_ALIAS[k]||k};
+function faktDodavatel(txt){
+  const s=String(txt||"");
+  for(const[re,n]of FAKT_DODAV)if(re.test(s))return n;
+  return "";
+}
 function faktHlavicka(txt){
   const s=String(txt||"");
-  const out={cislo:"",datum:"",zaklad:null,dph:null,celkem:null,rp:null};
+  const out={cislo:"",datum:"",zaklad:null,dph:null,celkem:null,rp:null,dodavatel:faktDodavatel(txt)};
   const mc=s.match(/dokladu?\s*(?:[čc]\.?)?\s*:?\s*([A-Z]{1,3}\d{5,}[A-Z0-9/-]*)/i);
   if(mc)out.cislo=mc[1];
   const md=s.match(/datum\s+vystaven[íi]\s*:?\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})/i);
@@ -3296,16 +3316,20 @@ function dnesLokalne(){
 }
 /* ke každé položce faktury najde nejlepší otevřený nákup od téhož dodavatele */
 function naparujFakturu(pol,dodavatel,bezDph,datum){
-  const dod=(dodavatel||"").trim().toLowerCase();
-  const otevrene=D.nakupy.filter(n=>!n.vyber&&!n.vratka
-    &&(!dod||dodavKlic(n.dodavatel)===dodavKlic(dod))
-    &&(Number(n.fakt)||0)<(Number(n.ks)||0));
+  const dod=dodavSjednot(dodavatel);
+  /* Bez dodavatele se nepáruje nic. Dřív se prohledávaly nákupy od všech
+     dodavatelů a řádek "Balné" z faktury ATC si našel procesor ze Smarty. */
+  const otevrene=dod?D.nakupy.filter(n=>!n.vyber&&!n.vratka
+    &&dodavSjednot(n.dodavatel)===dod
+    &&(Number(n.fakt)||0)<(Number(n.ks)||0)):[];
   const pouzite=new Set();
   /* pol.map() vyrobí nové pole a .meta (hlavička faktury se součty) by se
      ztratilo — náhled by pak neměl s čím porovnávat. */
   const vysl=pol.map(x=>{
     const cena=bezDph?naDph(x.cena):x.cena;
     const kompId=x.komp;
+    /* Balné, doprava, montáž — služba žádný nákup nemá a nesmí si ho najít. */
+    if(sluzbaBezNakupu(x.popis))return {...x,cena,nakup:null,skore:0,sluzba:true};
     let nej=null,nejS=0;
     for(const n of otevrene){
       if(pouzite.has(n.id))continue;
@@ -3745,9 +3769,10 @@ function zobrazKosikNahled(pol){
   $("#mTitle").textContent=`Vložit hromadně — ${pol.length} položek`;
   $("#mBody").innerHTML=`
     <div class="row" style="gap:8px;margin:0 0 10px;align-items:center">
-      <span style="font-size:12.5px;font-weight:600">Dodavatel pro všechny řádky:</span>
+      <span style="font-size:12.5px;font-weight:600">Dodavatel pro všechny řádky:
+        <span style="color:var(--bad)" title="Bez dodavatele se nedá napárovat faktura ani poznat, jestli jsou ceny bez DPH">*</span></span>
       <input type="text" id="kosikDodavatel" value="${esc(pol[0]&&pol[0].dodavatel||"")}"
-        placeholder="např. alza" style="max-width:170px;${stylDodavatele(pol[0]&&pol[0].dodavatel)}">
+        placeholder="povinné, např. alza" style="max-width:170px;${stylDodavatele(pol[0]&&pol[0].dodavatel)}">
       <span style="font-size:12.5px;font-weight:600;margin-left:14px">Doručení:</span>
       <input type="date" id="kosikDoruceni" value="${esc(kosikDoruceni||"")}"
         style="max-width:150px;font-size:12.5px" title="Vyplní se u všech založených nákupů">
@@ -3762,7 +3787,12 @@ function zobrazKosikNahled(pol){
       <th class="r" style="width:104px">Cena/ks s DPH</th><th class="r" style="width:96px">Celkem s DPH</th>
       <th style="width:30px"></th></tr></thead><tbody>
     ${pol.map((x,i)=>`<tr style="background:${x.komp?"#DDF3E6":"#FDF4D4"};box-shadow:inset 4px 0 0 ${x.komp?"#1B8A57":"#E0B740"}">
-      <td style="font-size:11.5px">${esc(x.popis)}${x.odkaz?` <a href="${esc(x.odkaz)}" target="_blank" rel="noopener">↗</a>`:""}</td>
+      <td><div class="row" style="gap:4px;align-items:center">
+        <input type="text" value="${esc(x.popis||"")}" data-ki="${i}" data-kf="popis"
+          title="Přesný název, který se uloží do nákupu — z něj se pak berou konkrétní modely"
+          style="width:100%;font-size:11.5px">
+        ${x.odkaz?`<a href="${esc(x.odkaz)}" target="_blank" rel="noopener" title="Otevřít u dodavatele" style="text-decoration:none;flex:0 0 auto">↗</a>`:""}
+      </div></td>
       <td><input type="date" value="${esc(x.datum||new Date().toISOString().slice(0,10))}" data-ki="${i}" data-kf="datum" style="font-size:11.5px;min-width:0"></td>
       <td><input type="text" list="kompList" value="${esc(x.komp?x.kompNazev:"")}"
         data-ki="${i}" data-kf="kompText" placeholder="dohledat v ceníku…"
@@ -5895,8 +5925,10 @@ document.addEventListener("input",e=>{
       const v=t.value.trim(); let nalezena=null;
       for(const arr of Object.values(D.komponenty))for(const k of arr) if(k.nazev===v&&!nalezena)nalezena=k;
       x.komp=nalezena?nalezena.id:null; x.kompNazev=nalezena?nalezena.nazev:"";
-      /* Zapamatujeme si to — příště se stejný produkt napáruje sám. */
-      const klic=norm3(x.popis||"");
+      /* Zapamatujeme si to — příště se stejný produkt napáruje sám.
+         Klíč musí projít stejnou úpravou jako při hledání (komponentaZPopisu),
+         jinak se naučená dvojice u procesorů a grafik nikdy nenajde. */
+      const klic=norm3(sjednotNazev(x.popis||""));
       if(klic){ if(nalezena)D.parovani[klic]=nalezena.id; else delete D.parovani[klic]; persist(); }
       t.style.fontWeight=nalezena?"700":"";
       t.style.background=nalezena?"":"#FFF8E1";
@@ -5910,6 +5942,16 @@ document.addEventListener("input",e=>{
     if(x){x[t.dataset.kf]=["ks","cena"].includes(t.dataset.kf)?(t.value===""?null:Number(t.value)):t.value;
       if(t.dataset.kf==="cena")x.surova=null;      // ruční cena má přednost před přepínačem
       if(t.dataset.kf==="ks")kosikPrepocti([x]);
+      /* Opravený název může napárovat řádek, který se sám nenapároval. Řádek
+         s ručně vybranou komponentou se nepřepisuje — tam rozhoduje Lukáš. */
+      if(t.dataset.kf==="popis"&&!x.komp){
+        const k=komponentaZPopisu(t.value);
+        if(k){ x.komp=k.id; x.kompNazev=k.nazev;
+          const tr2=t.closest("tr"); const ki=tr2&&tr2.querySelector('[data-kf="kompText"]');
+          if(ki){ki.value=k.nazev;ki.style.fontWeight="700";ki.style.background="";ki.style.borderColor=""}
+          if(tr2){tr2.style.background="#DDF3E6";tr2.style.boxShadow="inset 4px 0 0 #1B8A57"}
+        }
+      }
       const tr=t.closest("tr"); if(tr){const c=tr.querySelectorAll("td");
         if(c.length>=6)c[5].textContent=kc((x.ks||0)*((kosikBezDph?naDph(x.cena):x.cena)||0))}
       return}}
@@ -6092,12 +6134,19 @@ document.addEventListener("change",e=>{
     return}
   if(t.id==="kosikDodavatel"&&kosikCache){
     for(const x of kosikCache)x.dodavatel=t.value;
+    const bylo=kosikBezDph;
     if(!kosikRucne){                      // dodavatel může rozhodnout o DPH
       const dod=dodavKlic(t.value);
       const M=kosikCache.meta;
       kosikBezDph=(M&&M.dph>0)||(dod&&(D.bezDph||[]).includes(dod));
     }
-    zobrazKosikNahled(kosikCache); return}
+    /* Překreslit celou tabulku při psaní znamená ztracený kurzor. Udělá se to
+       jen tehdy, když se dodavatelem změnilo rozhodnutí o DPH — tam se mění
+       všechny ceny v tabulce a je potřeba je vidět. Jinak se jen přebarví
+       štítek dodavatele. */
+    t.setAttribute("style","max-width:170px;"+stylDodavatele(t.value));
+    if(kosikBezDph!==bylo)zobrazKosikNahled(kosikCache);
+    return}
   if(t.id==="nbVyber"){nbAkt=t.value||null;renderNab();return}
   if(t.dataset.nrnah!==undefined){const n=nbNajdi(); const r=n&&n.radky.find(x=>x.id===t.dataset.nrnah);
     if(r){r.nahrada=t.checked;renderNab();persist();return}}
@@ -6607,7 +6656,7 @@ document.addEventListener("click",e=>{
   if(t.id==="nkFaktura"){zobrazFakturu();return}
   if(t.id==="faktZrus"){fakturaCache=null;$("#modal").hidden=true;return}
   if(t.id==="faktParuj"){
-    const txt=$("#faktText").value, dod=$("#faktDodavatel").value.trim();
+    const txt=$("#faktText").value; let dod=$("#faktDodavatel").value.trim();
     let cislo=$("#faktCislo").value.trim();
     const pol=jeFakturaRadkova(txt)?rozeberFakturuRadky(txt):rozeberKosik(txt);
     if(!pol.length){toast("Z textu se nepodařilo nic vyčíst");return}
@@ -6617,7 +6666,17 @@ document.addEventListener("click",e=>{
     if(HL){
       if(!cislo&&HL.cislo){cislo=HL.cislo; $("#faktCislo").value=cislo}
       if(HL.datum&&$("#faktDatum"))$("#faktDatum").value=HL.datum;
+      /* Dodavatel z hlavičky rozhoduje. Když si odporuje s políčkem, párování
+         se zastaví — zapsat ceny z faktury na cizí nákupy by rozhodilo sklad. */
+      if(HL.dodavatel){
+        if(!dod){dod=HL.dodavatel; $("#faktDodavatel").value=dod}
+        else if(dodavSjednot(dod)!==dodavSjednot(HL.dodavatel)){
+          toast("Faktura je od „"+HL.dodavatel+"“, ale v políčku máš „"+dod+"“ — oprav to");return}
+      }
     }
+    if(!dod){toast("Vyplň dodavatele — faktura se páruje jen na jeho nákupy");
+      const pd=$("#faktDodavatel"); if(pd){pd.style.borderColor="var(--bad)";pd.style.background="#FDECEA";pd.focus()}
+      return}
     const nelze=pol.filter(x=>x.nelze);
     if(nelze.length)toast(nelze.length+(nelze.length===1?" řádek se nepodařilo přečíst":" řádky se nepodařilo přečíst"));
     const M=pol.meta;
@@ -6658,6 +6717,22 @@ document.addEventListener("click",e=>{
     zobrazKosikNahled(pol);return}
   if(t.id==="kosikOk"||t.id==="kosikObj"){
     if(!kosikCache)return;
+    /* Dodavatel je povinný. Bez něj se k nákupu nedá napárovat faktura, nepozná
+       se, jestli dodavatel fakturuje bez DPH, a v tabulce nákupů chybí štítek. */
+    const pd=$("#kosikDodavatel");
+    if(!((pd&&pd.value||"").trim())){
+      if(pd){pd.style.borderColor="var(--bad)";pd.style.background="#FDECEA";pd.focus()}
+      toast("Vyplň dodavatele — bez něj se nedá napárovat faktura");
+      return}
+    /* Zdrojem pravdy je políčko, ne cache. Do cache se dodavatel propisuje až
+       při opuštění políčka a na to se nedá spolehnout — nákupy by se pak
+       založily bez dodavatele. Když se liší, dopočítá se i rozhodnutí o DPH. */
+    const dodNaz=(pd.value||"").trim();
+    if(kosikCache.some(x=>String(x.dodavatel||"")!==dodNaz)){
+      for(const x of kosikCache)x.dodavatel=dodNaz;
+      if(!kosikRucne){ const dk=dodavKlic(dodNaz); const M=kosikCache.meta;
+        kosikBezDph=!!((M&&M.dph>0)||(dk&&(D.bezDph||[]).includes(dk))); }
+    }
     /* Kandidát (vybráno) se teprve chystá objednat, objednané už je na cestě. */
     const objednano=t.id==="kosikObj";
     const dnesni=new Date().toISOString().slice(0,10);
