@@ -1386,7 +1386,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=238;
+const VERZE=239;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3473,13 +3473,29 @@ function komponentaZPopisu(txt){
   const naucene=(D.parovani||{})[klic];
   if(naucene){const k=najdiKomp(naucene); if(k)return k}
   const t=klic.split(" ");
-  let nej=null,nejS=0;
+  let nej=null,nejS=0,nejKat="";
   for(const[c,arr]of Object.entries(D.komponenty))for(const k of arr){
     if(k.genericky)continue;
     const sl=norm3(k.nazev).split(" ").filter(Boolean);
     if(!sl.length)continue;
     const shoda=sl.filter(w=>t.includes(w)).length/sl.length;
-    if(shoda>=0.85&&(shoda>nejS||(shoda===nejS&&nej&&k.nazev.length>nej.nazev.length))){nejS=shoda;nej=k}
+    if(shoda>=0.85&&(shoda>nejS||(shoda===nejS&&nej&&k.nazev.length>nej.nazev.length))){nejS=shoda;nej=k;nejKat=c}
+  }
+  /* WIFI deska není totéž co stejná deska bez WIFI — jiné zboží, jiná cena.
+     Když je WIFI v popisu od dodavatele a ve vybrané komponentě není, vezme se
+     WIFI varianta téže desky. Když jsou dvě, nepáruje se nic a vybere Lukáš —
+     špatně napárovaná deska by přepsala skladovou cenu u cizí komponenty. */
+  if(nej&&/(^| )wifi( |$)/.test(klic)&&!/(^| )bez wifi( |$)/.test(klic)&&!/wifi/.test(norm3(nej.nazev))){
+    const sl=norm3(nej.nazev).split(" ").filter(Boolean);
+    const var2=(D.komponenty[nejKat]||[]).filter(k=>{
+      if(k.genericky||k===nej)return false;
+      const w=norm3(k.nazev).split(" ").filter(Boolean);
+      if(!w.includes("wifi"))return false;
+      if(!sl.every(x=>w.includes(x)))return false;
+      return w.filter(x=>t.includes(x)).length/w.length>=0.6;
+    });
+    if(var2.length===1)return var2[0];
+    if(var2.length>1)return null;
   }
   return nej;
 }
@@ -3607,6 +3623,10 @@ function rozeberVolnyText(t){
    počet kusů a cena — s odkazem i bez něj, protože ze schránky odkazy nepřijdou. */
 /* Krátké stavové řádky uvnitř položky — přeskočí se a nic nerozdělují. */
 const KOSIK_STAV=/^(\+\s*)?(služba|sluzba|rezervováno|rezervovano|rezervace|skladem|dárek|darek|na cestě|na ceste|k vyzvednutí|k vyzvednuti|expedujeme|dostupné|dostupne|dodáno|dodano|objednáno|objednano|vyfakturováno|vyfakturovano|čeká|ceka)\s*:?(\s+\d+\s*(?:ks|x)?)?\s*$/i;
+/* Stav objednávky u Alzy. Bez toho se "Zpracovává se" vzalo jako název položky
+   (a pravý název z odkazu se zahodil), takže se nenapárovala komponenta
+   ani dodavatel. Řádky se stavem se přeskakují. */
+const KOSIK_STAV_OBJ=/^(zpracov[áa]v[áa]\s*se|zpracov[áa](n[íi]|v[áa]me)|vy[řr]izuje\s*se|p[řr]ipravujeme|p[řr]ipraveno(\s+k\s+(odesl[áa]n[íi]|vyzvednut[íi]))?|odesl[áa]no|p[řr]ed[áa]no\s+p[řr]epravci|doru[čc]eno|vyzvednuto|zrušeno|zruseno|stornov[áa]no)\s*\.?\s*$/i;
 /* Řádky o platbě a doručení na konci košíku. */
 const KOSIK_KONEC=/^(přidat zboží|pridat zbozi|bankovním|bankovnim|doručení|doruceni|platba|způsob|zpusob|hotově|hotove|kartou|dobírkou|dobirkou|osobní|osobni)/i;
 const KOSIK_SOUHRN=/^(cena bez dph|celková cena|celkova cena|celkem|mezisou|k úhradě|k uhrade)/i;
@@ -3669,7 +3689,7 @@ function rozeberRadky(radky){
        Kdyby spadly do jednoho pole, vzala by se u víc kusů ta nižší jako celková. */
     const mc=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc](\s*bez\s*DPH)?/i);
     if(mc){ if(cur)(mc[2]?cur.cenyBez:cur.ceny).push(cis(mc[1])); continue }
-    if(KOSIK_STAV.test(l))continue;
+    if(KOSIK_STAV.test(l)||KOSIK_STAV_OBJ.test(l))continue;
     /* Smarty uvádí u každé položky "Doručení 25.9. (pátek)". Je to údaj k položce,
        ne konec košíku — datum si zapamatujeme a řádek přeskočíme. */
     const mdor=l.match(/^doru[čc]en[ií]\s+(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{4})?/i);
