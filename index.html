@@ -1386,7 +1386,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=239;
+const VERZE=241;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3467,6 +3467,10 @@ function sjednotNazev(t){
     .replace(/\bintel\s+core\s+i(\d)\b/gi,"core i$1")
     .replace(/\bgeforce\s+/gi,"").replace(/\bradeon\s+/gi,"");
 }
+/* Jednotky a kapacity v názvu komponenty nerozhodují o modelu. */
+const JEDN_SLOVA=["gb","tb","mb","w","mm","cm","hz","ks","rpm"];
+/* Tokeny, které dělají jiný model, ne jen jinou variantu. */
+const ROZLISOVACE=["ti","super","xt","xtx"];
 function komponentaZPopisu(txt){
   /* Nejdřív to, co jsme se jednou naučili ručně — přesný popis od dodavatele. */
   const klic=norm3(sjednotNazev(txt));
@@ -3480,6 +3484,29 @@ function komponentaZPopisu(txt){
     if(!sl.length)continue;
     const shoda=sl.filter(w=>t.includes(w)).length/sl.length;
     if(shoda>=0.85&&(shoda>nejS||(shoda===nejS&&nej&&k.nazev.length>nej.nazev.length))){nejS=shoda;nej=k;nejKat=c}
+  }
+  /* Konkrétnější komponenta přebíjí obecnější. "RTX 5070 Ti 16GB" obsahuje
+     všechna slova "RTX 5070" a navíc Ti — a když je Ti i v popisu od dodavatele,
+     je to ta karta. Dřív vyhrál obecný "RTX 5070" se 100 % slov a 5070 Ti se
+     napárovala na jinou, o desítky tisíc levnější kartu. */
+  if(nej){
+    const sl=norm3(nej.nazev).split(" ").filter(Boolean);
+    let spec=null,specN=0,specSpor=false;
+    for(const k of (D.komponenty[nejKat]||[])){
+      if(k.genericky||k===nej)continue;
+      const w=norm3(k.nazev).split(" ").filter(Boolean);
+      if(!sl.every(x=>w.includes(x)))continue;        // musí obsahovat celou vybranou
+      const extra=w.filter(x=>!sl.includes(x));
+      /* Slovní rozlišovač (Ti, XT, WIFI, TUF, PRO) musí být v popisu, jinak je to
+         jiný model. Kapacity a jednotky nerozhodují — "16GB" se píše všelijak. */
+      const slovni=extra.filter(x=>/^[a-z]+$/.test(x)&&!JEDN_SLOVA.includes(x));
+      if(!slovni.length||!slovni.every(x=>t.includes(x)))continue;
+      const maji=extra.filter(x=>t.includes(x)).length;
+      if(maji>specN){specN=maji;spec=k;specSpor=false}
+      else if(maji===specN)specSpor=true;
+    }
+    if(spec&&specSpor)return null;                    // dvě stejně dobré — vybere Lukáš
+    if(spec)nej=spec;
   }
   /* WIFI deska není totéž co stejná deska bez WIFI — jiné zboží, jiná cena.
      Když je WIFI v popisu od dodavatele a ve vybrané komponentě není, vezme se
@@ -3496,6 +3523,15 @@ function komponentaZPopisu(txt){
     });
     if(var2.length===1)return var2[0];
     if(var2.length>1)return null;
+  }
+  /* Ti, Super, XT a X3D znamenají jiný čip za jinou cenu. Když se popis od
+     dodavatele a komponenta v tomhle rozcházejí, nepáruje se nic — radši řádek
+     ke schválení než přepsaná skladová cena u cizí komponenty. */
+  if(nej){
+    const n=norm3(nej.nazev).split(" ");
+    for(const q of ROZLISOVACE)if(t.includes(q)!==n.includes(q))return null;
+    const bezMezer=x=>String(x).replace(/ /g,"");
+    if(/x3d/.test(bezMezer(klic))!==/x3d/.test(bezMezer(norm3(nej.nazev))))return null;
   }
   return nej;
 }
@@ -3806,7 +3842,16 @@ function zobrazKosikNahled(pol){
       <th class="r" style="width:52px">Ks</th>
       <th class="r" style="width:104px">Cena/ks s DPH</th><th class="r" style="width:96px">Celkem s DPH</th>
       <th style="width:30px"></th></tr></thead><tbody>
-    ${pol.map((x,i)=>`<tr style="background:${x.komp?"#DDF3E6":"#FDF4D4"};box-shadow:inset 4px 0 0 ${x.komp?"#1B8A57":"#E0B740"}">
+    ${pol.map((x,i)=>{
+      /* Hlídka na špatné párování: když se cena od dodavatele výrazně rozchází
+         s cenou komponenty, je to většinou jiný model. Jen upozornění, nic se
+         nepřepisuje — ceny se na trhu hýbou. */
+      const kp=x.komp?najdiKomp(x.komp):null;
+      const cenaK=kp?(Number(kp.sklad)||Number(kp.novy)||0):0;
+      const cenaN=(kosikBezDph?naDph(x.cena):x.cena)||0;
+      const odch=(cenaK>0&&cenaN>0)?(cenaN-cenaK)/cenaK:0;
+      const pozor=Math.abs(odch)>=0.35;
+      return `<tr style="background:${x.komp?"#DDF3E6":"#FDF4D4"};box-shadow:inset 4px 0 0 ${x.komp?"#1B8A57":"#E0B740"}">
       <td><div class="row" style="gap:4px;align-items:center">
         <input type="text" value="${esc(x.popis||"")}" data-ki="${i}" data-kf="popis"
           title="Přesný název, který se uloží do nákupu — z něj se pak berou konkrétní modely"
@@ -3819,9 +3864,12 @@ function zobrazKosikNahled(pol){
         style="width:100%;font-size:11.5px;${x.komp?"font-weight:700":"background:#FFF8E1;border-color:#E0B740"}"></td>
       <td class="r"><input type="number" class="px" value="${x.ks}" data-ki="${i}" data-kf="ks"></td>
       <td class="r"><input type="number" class="px" value="${(kosikBezDph?naDph(x.cena):x.cena)??""}" data-ki="${i}" data-kf="cena" placeholder="—">
-        ${kosikBezDph&&x.cena!=null?`<div style="font-size:10px;color:var(--ink-3);margin-top:2px">z ${kc(x.cena)} bez DPH</div>`:""}</td>
+        ${kosikBezDph&&x.cena!=null?`<div style="font-size:10px;color:var(--ink-3);margin-top:2px">z ${kc(x.cena)} bez DPH</div>`:""}
+        ${pozor?`<div style="font-size:10px;color:var(--bad);font-weight:700;margin-top:2px"
+          title="Cena komponenty v ceníku je ${kc(cenaK)}. Takový rozdíl obvykle znamená, že je napárovaný jiný model.">
+          ${odch>0?"+":"−"}${Math.round(Math.abs(odch)*100)} % proti ceníku — ověř komponentu</div>`:""}</td>
       <td class="r num">${kc((x.ks||0)*((kosikBezDph?naDph(x.cena):x.cena)||0))}</td>
-      <td class="r"><button class="icon-x" data-ksmaz="${i}" title="Vyhodit řádek">✕</button></td></tr>`).join("")}
+      <td class="r"><button class="icon-x" data-ksmaz="${i}" title="Vyhodit řádek">✕</button></td></tr>`}).join("")}
     </tbody></table></div>
     ${(()=>{const M=pol.meta; if(!M||(!M.zaklad&&!M.celkem))return "";
       const polozky=pol.reduce((a,x)=>a+(x.ks||0)*(x.cena||0),0);
@@ -6426,7 +6474,9 @@ document.addEventListener("click",e=>{
 
       <h3 style="font-size:13px;margin:14px 0 4px">Změnil jsem cenu komponenty</h3>
       <p style="margin:0 0 10px">Dotkne se všech sestav, které ji mají v základu — použij
-      <strong>Stáhnout ceny ↓ pro Shoptet</strong>. Vezme všechny sestavy najednou, kromě těch s drženou cenou.</p>
+      <strong>Stáhnout ceny ↓ pro Shoptet</strong>. Vezme všechny sestavy najednou, kromě těch s drženou cenou.
+      Co odejde do souboru, si kalkulačka zapíše jako cenu, která je na e-shopu — <em>Změny cen ↓</em> je proto
+      příště už nenabídne. Platí to i pro <em>Všechny ceny ↓</em>, takže ten soubor opravdu importuj.</p>
 
       <h3 style="font-size:13px;margin:14px 0 4px">Změnil jsem cenu komponenty v příplatku</h3>
       <p style="margin:0 0 10px">Cena sestavy se nemění, mění se cena příplatku. Použij
@@ -6621,12 +6671,13 @@ document.addEventListener("click",e=>{
     /* ceny a kategorie do dvou souborů — společný soubor by u sestav
        s méně kategoriemi posílal prázdné sloupce a mohl je na e-shopu smazat */
     const rows=[["code","pairCode","price"]]; const rowsK=[]; let n=0, lv=0; let KATmaxZmen=0;
-    const drzene=[];
+    const drzene=[]; let zapsano=0;
     for(const s of D.sestavy){
       const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
       if(!kody.length)continue;
       if(s.drzena!=null){drzene.push((s.nazev||"bez názvu")+" — držím "+kc(s.drzena));continue}
       const c=spocti(s), V=varianty(s);
+      let zaklCena=null;                 // nejnižší vyexportovaná = základní varianta
       for(const kod of kody){
         const vv=variantaProKod(s,V,kod);
         const cenaK=Math.round(vv?vv.cenaProdej:c.prodej);
@@ -6640,9 +6691,15 @@ document.addEventListener("click",e=>{
           kat=s.kategorie.map(x=>jeLevel(x)?sePodleVzoru(novyLvl,x):x);
         }
         rows.push([kod,pairProKod(kod,s),String(cenaK)]); n++;
+        if(zaklCena===null||cenaK<zaklCena)zaklCena=cenaK;
         if(kat.length&&zmenaLevelu){ rowsK.push([kod,pairProKod(kod,s),...kat]);
           if(kat.length>KATmaxZmen)KATmaxZmen=kat.length }
       }
+      /* Co odešlo do souboru, je od teď cena na e-shopu — jinak by Změny cen ↓
+         nabízely ty samé sestavy pořád znovu, dokud se nenačte export produktů.
+         Porovnává se základní, tedy nejlevnější varianta, stejně jako ve Změnách cen. */
+      if(zaklCena!==null)s.excel=zaklCena;
+      zapsano++;
     }
     dl(`shoptet-ceny-vse-${dnes()}-${n}variant.csv`,csv(bezNulovychCen(rows)),"text/csv");
     if(rowsK.length){
@@ -6650,8 +6707,10 @@ document.addEventListener("click",e=>{
       dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
         csv([["code","pairCode",...cols],...rowsK.map(r=>[r[0],r[1],...cols.map((_,i)=>r[2+i]||"")])]),"text/csv");
     }
+    if(zapsano){renderSest();persist()}
     toast(n+" variant v cenách"+(rowsK.length?"  ·  "+rowsK.length+" variant mění level, kategorie zvlášť":"  ·  levely beze změny")
-      +(drzene.length?"  ·  "+drzene.length+" sestav vynecháno":""));
+      +(drzene.length?"  ·  "+drzene.length+" sestav vynecháno":"")
+      +(zapsano?"  ·  "+zapsano+" sestav zapsáno jako nahrané na e-shop":""));
     if(drzene.length)alert("Do exportu nešly sestavy s drženou cenou:\n\n"+drzene.join("\n")
       +"\n\nDržení zrušíš tlačítkem na kartě sestavy.");
   }
