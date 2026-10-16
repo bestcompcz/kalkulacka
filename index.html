@@ -822,7 +822,7 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   /* Dřív se klíč ukládal bez sjednotNazev, takže "amd ryzen 5 9600x" se nikdy
      nenašlo (hledá se pod "r 5 9600 x"). Překlíčujeme to. */
   for(const k of Object.keys(d.parovani)){
-    const nk=norm3(sjednotNazev(k));
+    const nk=norm3(sjednotNazev(bezKategorie(k)));
     if(nk&&nk!==k){ if(!d.parovani[nk])d.parovani[nk]=d.parovani[k]; delete d.parovani[k] }
   }
   if(!Array.isArray(d.cenaZaKus))d.cenaZaKus=["mironet"];      // uvádějí cenu za kus, ne za položku
@@ -1386,7 +1386,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=241;
+const VERZE=242;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3467,16 +3467,42 @@ function sjednotNazev(t){
     .replace(/\bintel\s+core\s+i(\d)\b/gi,"core i$1")
     .replace(/\bgeforce\s+/gi,"").replace(/\bradeon\s+/gi,"");
 }
+/* Alza a spol. lepí před název produktu kategorii ("Operační paměť Patriot
+   Viper Elite 5 16GB"). Do nákupu patří jen název produktu. Delší fráze musí
+   být dřív, jinak by "ssd" předběhlo "ssd disk". Zapsané bez diakritiky —
+   porovnává se přes norm3. */
+const KAT_PREFIXY=["set klavesnice a mysi","chladic na procesor","pocitacova skrin",
+  "operacni pamet","graficka karta","zakladni deska","napajeci zdroj","vodni chlazeni",
+  "klavesnice a mys","sitova karta","externi disk","interni disk","cpu chladic",
+  "pevny disk","ssd disk","herni mys","pc skrin","ventilator","chlazeni","procesor",
+  "chladic","skrin","zdroj","ssd"];
+function bezKategorie(t){
+  const s=String(t||"").trim(); if(!s)return s;
+  const w=s.split(/\s+/);
+  for(const f of KAT_PREFIXY){
+    const n=f.split(" ").length;
+    if(w.length<=n)continue;                       // nesmí zbýt prázdný název
+    if(norm3(w.slice(0,n).join(" "))!==f)continue;
+    const zbytek=w.slice(n).join(" ").trim();
+    if(zbytek.length>=4)return zbytek;
+  }
+  return s;
+}
 /* Jednotky a kapacity v názvu komponenty nerozhodují o modelu. */
 const JEDN_SLOVA=["gb","tb","mb","w","mm","cm","hz","ks","rpm"];
 /* Tokeny, které dělají jiný model, ne jen jinou variantu. */
 const ROZLISOVACE=["ti","super","xt","xtx"];
 function komponentaZPopisu(txt){
-  /* Nejdřív to, co jsme se jednou naučili ručně — přesný popis od dodavatele. */
-  const klic=norm3(sjednotNazev(txt));
+  /* Nejdřív to, co jsme se jednou naučili ručně — přesný popis od dodavatele.
+     Klíč je bez kategorie, aby seděl na "Operační paměť Patriot…" i na samotné
+     "Patriot…" — od verze 242 se do nákupu ukládá název už bez kategorie. */
+  const klic=norm3(sjednotNazev(bezKategorie(txt)));
   const naucene=(D.parovani||{})[klic];
   if(naucene){const k=najdiKomp(naucene); if(k)return k}
-  const t=klic.split(" ");
+  /* Hledání podle slov jede z celého názvu včetně kategorie — "SSD" v popisu
+     pomáhá najít "256 GB SSD". */
+  const plny=norm3(sjednotNazev(txt));
+  const t=plny.split(" ");
   let nej=null,nejS=0,nejKat="";
   for(const[c,arr]of Object.entries(D.komponenty))for(const k of arr){
     if(k.genericky)continue;
@@ -3512,7 +3538,7 @@ function komponentaZPopisu(txt){
      Když je WIFI v popisu od dodavatele a ve vybrané komponentě není, vezme se
      WIFI varianta téže desky. Když jsou dvě, nepáruje se nic a vybere Lukáš —
      špatně napárovaná deska by přepsala skladovou cenu u cizí komponenty. */
-  if(nej&&/(^| )wifi( |$)/.test(klic)&&!/(^| )bez wifi( |$)/.test(klic)&&!/wifi/.test(norm3(nej.nazev))){
+  if(nej&&/(^| )wifi( |$)/.test(plny)&&!/(^| )bez wifi( |$)/.test(plny)&&!/wifi/.test(norm3(nej.nazev))){
     const sl=norm3(nej.nazev).split(" ").filter(Boolean);
     const var2=(D.komponenty[nejKat]||[]).filter(k=>{
       if(k.genericky||k===nej)return false;
@@ -3531,7 +3557,7 @@ function komponentaZPopisu(txt){
     const n=norm3(nej.nazev).split(" ");
     for(const q of ROZLISOVACE)if(t.includes(q)!==n.includes(q))return null;
     const bezMezer=x=>String(x).replace(/ /g,"");
-    if(/x3d/.test(bezMezer(klic))!==/x3d/.test(bezMezer(norm3(nej.nazev))))return null;
+    if(/x3d/.test(bezMezer(plny))!==/x3d/.test(bezMezer(norm3(nej.nazev))))return null;
   }
   return nej;
 }
@@ -3772,8 +3798,9 @@ function rozeberKosik(txt){
     ||radky.some(l=>/\]\(https?:\/\/[^\s)]+\)\s*\d+\s*(?:ks|x)\b/i.test(l));
   const zdroj=tab.length?tab:(jeRadkovy?rozeberRadky(radky):rozeberVolnyText(txt));
   const r=zdroj.map(x=>{
+    /* Párujeme z původního textu, ukládáme název bez kategorie e-shopu. */
     const k=komponentaZPopisu(x.popis);
-    return Object.assign({},x,{komp:k?k.id:null,kompNazev:k?k.nazev:null,
+    return Object.assign({},x,{popis:bezKategorie(x.popis),komp:k?k.id:null,kompNazev:k?k.nazev:null,
       dodavatel:x.dodavatel||dodavatelZOdkazu(x.odkaz)||odhadniDodavatele(zdroj)});
   });
   r.meta=zdroj.meta;
@@ -5996,7 +6023,7 @@ document.addEventListener("input",e=>{
       /* Zapamatujeme si to — příště se stejný produkt napáruje sám.
          Klíč musí projít stejnou úpravou jako při hledání (komponentaZPopisu),
          jinak se naučená dvojice u procesorů a grafik nikdy nenajde. */
-      const klic=norm3(sjednotNazev(x.popis||""));
+      const klic=norm3(sjednotNazev(bezKategorie(x.popis||"")));
       if(klic){ if(nalezena)D.parovani[klic]=nalezena.id; else delete D.parovani[klic]; persist(); }
       t.style.fontWeight=nalezena?"700":"";
       t.style.background=nalezena?"":"#FFF8E1";
