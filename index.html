@@ -358,9 +358,7 @@ tr.unused td{background:#FEFCFB}
     <h2 style="margin:0">Sestavy</h2>
     <button class="btn btn-sm" id="addBuild">Přidat sestavu</button>
     <button class="btn btn-sm" id="expBuilds">Přehled CSV</button>
-    <button class="btn btn-sm btn-primary" id="expShoptet" title="Stáhne CSV, které pak importuješ v Shoptetu">Stáhnout příplatky ↓ pro Shoptet</button>
-    <button class="btn btn-sm btn-primary" id="zmenyCen" title="Ukáže, které sestavy mění cenu proti e-shopu">Změny cen ↓</button>
-    <button class="btn btn-sm" id="expCeny" title="Stáhne CSV se všemi sestavami">Všechny ceny ↓</button>
+    <button class="btn btn-sm btn-primary" id="expVse" title="Ukáže, co se na e-shopu změní, a stáhne jen ty soubory, které mají co posílat">Stáhnout vše pro Shoptet ↓</button>
     <button class="btn btn-sm" id="expNavod" title="Jak na export">?</button>
     <button class="btn btn-sm" id="impCeny" title="Načte export produktů ze Shoptetu do kalkulačky">Načíst ↑ z e-shopu do kalkulačky</button>
     <input type="file" id="cenyFile" accept=".csv,text/csv" style="display:none">
@@ -818,6 +816,9 @@ const MAPA_DEF={"CPU":"Výměna procesoru","RAM":"Rozšířit pamět RAM","SSD":
  "Základní deska":"Výměna základní desky","Zdroj":"Výměna zdroje","Chladič":"Lepší chlazení CPU"};
 function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.bezDph))d.bezDph=["atc","atcomp","asbis","100mega"];   // uvádějí ceny bez DPH
+  /* Ceny příplatků, jak naposledy odešly do Shoptetu. null = nikdy neodešly,
+     pak se posílají všechny. */
+  if(d.priplatkyOdeslano===undefined)d.priplatkyOdeslano=null;
   if(!d.parovani||typeof d.parovani!=="object")d.parovani={};  // naučené dvojice popis → komponenta
   /* Dřív se klíč ukládal bez sjednotNazev, takže "amd ryzen 5 9600x" se nikdy
      nenašlo (hledá se pod "r 5 9600 x"). Překlíčujeme to. */
@@ -1386,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=242;
+const VERZE=243;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -1974,6 +1975,70 @@ function zobrazZmenyCen(){
   modalKomp=null; $("#modal").hidden=false;
 }
 
+let exVseCache=null;
+/* Jedno okno místo tří tlačítek: ukáže, co se na e-shopu změní — ceny sestav,
+   příplatky, cenové levely — a stáhne jen soubory, které mají co posílat. */
+function novyLevel(c){return LEVELY.find(([lim])=>c<=lim)[1]}
+function meniLevel(s,nova){
+  const st=(s.kategorie||[]).find(jeLevel);
+  return !!st&&!stejnyLevel(st,novyLevel(nova));
+}
+function zobrazExportVse(){
+  const L=zmenyCen(), PR=zmenyPriplatku();
+  const lvl=L.filter(x=>meniLevel(x.s,x.nova));
+  exVseCache={L,PR};
+  $("#mTitle").textContent="Stáhnout vše pro Shoptet";
+  const H=(n,t)=>`<h3 style="font-size:13px;margin:16px 0 6px">${n} · ${t}</h3>`;
+  $("#mBody").innerHTML=`
+    <p class="hint" style="margin:0 0 4px">Takhle se změní e-shop. Stáhnou se jen soubory, které mají co posílat,
+      a kalkulačka si zapíše, že ceny odešly — tak je opravdu naimportuj.</p>
+    ${H(1,"Ceny sestav")}
+    ${L.length?`<p class="hint" style="margin:0 0 6px">${L.length} ${L.length===1?"sestava se liší":"sestav se liší"} od e-shopu. Odškrtnutá si drží cenu, kterou na e-shopu má.</p>
+    <div class="tbl"><table><thead><tr><th style="width:34px"></th><th>Sestava</th>
+      <th style="width:106px" title="Základní, tedy nejlevnější varianta">Základní varianta</th>
+      <th class="r" style="width:92px">Na e-shopu</th><th class="r" style="width:92px">Nově</th>
+      <th class="r" style="width:84px">Rozdíl</th><th style="width:96px">Level</th></tr></thead><tbody>
+    ${L.map((x,i)=>{
+      const r=x.stara===null?null:x.nova-x.stara;
+      return `<tr style="background:${x.drzena?"#FDE7E4":r===null?"#FFF8E1":"#FFFFFF"}">
+      <td class="r"><input type="checkbox" checked data-ex="${i}" style="width:auto;cursor:pointer"></td>
+      <td><strong>${esc(x.s.nazev)}</strong>${x.drzena?` <span class="band" style="background:#C0392B;color:#fff;font-weight:700"
+        title="Posílá se tvoje držená cena, výpočet dává ${kc(x.vypocet)}">držená cena</span>`:""}</td>
+      <td style="font-size:11.5px">${esc(x.kodZakl)}</td>
+      <td class="r num">${x.stara===null?"—":kc(x.stara)}</td>
+      <td class="r num" style="font-weight:600">${kc(x.nova)}</td>
+      <td class="r num" style="color:${r===null?"var(--ink-3)":r>0?"var(--bad)":"var(--ok)"}">${r===null?"neznámá":(r>0?"+":"")+r}</td>
+      <td style="font-size:11px">${meniLevel(x.s,x.nova)?`<span class="band" style="background:#E0B740;color:#3B2C05;font-weight:700">mění se</span>`:"beze změny"}</td></tr>`}).join("")}
+    </tbody></table></div>
+    ${L.some(x=>x.stara===null)?`<p class="hint" style="margin:6px 0 0">Žluté řádky nemají načtenou cenu z e-shopu — dej <em>Načíst ↑ z e-shopu do kalkulačky</em>, ať je s čím porovnávat.</p>`:""}`
+    :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Ceny sedí s e-shopem, posílat není co.</p>`}
+    ${H(2,"Příplatky")}
+    ${!PR.znamo?`<p style="margin:0;font-size:12.5px">Příplatky se z kalkulačky ještě neposílaly, takže se pošle celá sada.</p>`
+      :PR.radky.length?`<p class="hint" style="margin:0 0 6px">${PR.radky.length} ${PR.radky.length===1?"příplatek mění":"příplatků mění"} cenu proti poslednímu odeslání. Posílá se vždy celá sada, Shoptet přepíše jen zahrnuté produkty.</p>
+      <div class="tbl"><table><thead><tr><th>Příplatek</th><th style="width:150px">Parametr</th>
+        <th class="r" style="width:88px">Posláno</th><th class="r" style="width:88px">Nově</th>
+        <th class="r" style="width:76px">Rozdíl</th><th class="r" style="width:70px">Sestav</th></tr></thead><tbody>
+      ${PR.radky.map(x=>`<tr><td>${esc(x.p.eshop||x.p.nazev)}</td><td style="font-size:11.5px">${esc(x.param)}</td>
+        <td class="r num">${x.stara===null?"—":kc(x.stara)}</td><td class="r num" style="font-weight:600">${x.nova==null?"—":kc(x.nova)}</td>
+        <td class="r num" style="color:${x.stara!==null&&x.nova>x.stara?"var(--bad)":"var(--ok)"}">${x.stara===null||x.nova==null?"—":(x.nova-x.stara>0?"+":"")+Math.round(x.nova-x.stara)}</td>
+        <td class="r num">${x.sestav}</td></tr>`).join("")}
+      </tbody></table></div>`
+      :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Příplatky se od posledního odeslání nezměnily.</p>`}
+    ${H(3,"Kategorie — cenový level")}
+    ${lvl.length?`<ul style="margin:0;padding-left:18px;font-size:12.5px">
+      ${lvl.map(x=>{const st=(x.s.kategorie||[]).find(jeLevel);
+        /* Zobrazíme level v tom tvaru, v jakém odejde do souboru. */
+        return `<li><strong>${esc(x.s.nazev)}</strong> — ${esc(st||"bez levelu")} → <strong>${esc(st?sePodleVzoru(novyLevel(x.nova),st):novyLevel(x.nova))}</strong></li>`}).join("")}</ul>
+      <p class="hint" style="margin:6px 0 0">Kategorie jdou vždy zvlášť od cen — prázdný sloupec s kategorií je pro Shoptet pokyn ke smazání.</p>`
+      :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Žádná sestava nemění cenový level.</p>`}
+    <div class="row" style="gap:10px;margin-top:14px;align-items:center;justify-content:flex-end">
+      <label class="row" style="gap:6px;font-size:12px;color:var(--ink-2);cursor:pointer;margin-right:auto"
+        title="Pro případ, kdy se e-shop rozejde s kalkulačkou a chceš přetlačit celý katalog">
+        <input type="checkbox" id="exVsechny" style="width:auto"> poslat i sestavy, které se neliší</label>
+      <button class="btn btn-sm" id="exVseZrus">Zrušit</button>
+      <button class="btn btn-sm btn-primary" id="exVseOk">Stáhnout a zapsat jako nahrané</button></div>`;
+  modalKomp=null; $("#modal").hidden=false;
+}
 function renderCloud(){
   /* Tečka v horní liště: zelená uloženo, červená neuložené změny, šedá bez spojení. */
   const tec=$("#cloudTecka");
@@ -4853,7 +4918,7 @@ function zobrazVse(){
   </div>
   ${(A.doplnek||[]).length?`<div style="margin-top:16px">
     <h3 style="margin:0 0 6px;font-size:13px">3b · Rozešlo se s e-shopem jinak než naskladněním — ${A.doplnek.length}</h3>
-    <p class="hint" style="margin:0 0 8px">Těmhle sestavám naskladnění cenu nezměnilo, ale s e-shopem nesedí — třeba protože jsi u komponenty zvedl reprodukční cenu. Tlačítko <strong>Potvrdit a stáhnout vše pro Shoptet</strong> je pošle do souboru <strong>shoptet-ceny-doplnek</strong>. Tlačítko jen pro ceny je vynechá.</p>
+    <p class="hint" style="margin:0 0 8px">Těmhle sestavám naskladnění cenu nezměnilo, ale s e-shopem nesedí — třeba protože jsi u komponenty zvedl reprodukční cenu. Tlačítko <strong>Potvrdit a stáhnout vše pro Shoptet</strong> je ukáže v okně exportu spolu s ostatními.</p>
     <div class="tbl"><table><thead><tr><th>Sestava</th><th class="r" style="width:92px">E-shop</th>
       <th class="r" style="width:92px">Nově</th><th class="r" style="width:72px">Rozdíl</th>
       <th class="r" style="width:58px">Variant</th><th>Které</th></tr></thead><tbody>
@@ -4870,7 +4935,7 @@ function zobrazVse(){
   <div style="margin-top:16px">
     <h3 style="margin:0 0 6px;font-size:13px">4 · Ceny příplatků${A.pripl.length?" — "+A.pripl.length+" se mění":" — beze změny"}</h3>
     ${A.pripl.length?`<p class="hint" style="margin:0 0 8px;color:var(--bad);font-weight:600">
-      Po potvrzení stáhni <em>Stáhnout příplatky ↓ pro Shoptet</em> v hlavičce Sestav a importuj je.
+      Po potvrzení je nabídne okno <em>Stáhnout vše pro Shoptet ↓</em> spolu s cenami.
       Ceny sestav se přitom hnout nemusely.</p>
       <div class="tbl"><table><thead><tr><th>Příplatek</th><th>Parametr</th><th class="r">Sestav</th>
         <th class="r">Teď</th><th class="r">Nově</th><th class="r">Rozdíl</th><th>Proč</th></tr></thead><tbody>
@@ -4893,8 +4958,8 @@ function zobrazVse(){
         <li><strong>Importuj ceny do Shoptetu</strong> — soubor <code>shoptet-ceny-…csv</code>, který se
             stáhne z tohohle okna. Obsahuje jen zaškrtnuté sestavy.</li>
         <li><strong>Zkontroluj příplatky.</strong> Když se v kroku 2 změnila cena komponenty, která je cílem
-            nějakého příplatku — paměť, chladič, disk, WIFI — stáhni <em>Stáhnout příplatky pro Shoptet</em>
-            v hlavičce Sestav a <strong>importuj do Shoptetu</strong> i ten. Ceny sestav se přitom nemusely hnout vůbec.</li>
+            nějakého příplatku — paměť, chladič, disk, WIFI — najdeš je v okně <em>Stáhnout vše pro Shoptet ↓</em>
+            a <strong>importuj do Shoptetu</strong> i ten soubor. Ceny sestav se přitom nemusely hnout vůbec.</li>
         <li><strong>Kategorie</strong> jen u sestav, kde je nahoře žlutá hláška o změně levelu.
             Stáhneš je tlačítkem <em>Stáhnout pro Shoptet</em> na kartě té sestavy a importuješ zvlášť.</li>
         <li><strong>Ověř jednu variantu</strong> na e-shopu — cenu i rozbalovátko s příplatky.</li>
@@ -4933,8 +4998,32 @@ function provedVse(){
   });
   return {n:A.nask.length,c:A.ceny.length,drzet};
 }
+/* U kolika sestav se příplatek vůbec nabízí — bez toho nevíme, jestli má smysl
+   ho posílat. Počítá se jednou pro všechny příplatky, ne pro každý zvlášť. */
+function priplatkyPocty(){
+  const m={};
+  for(const s of D.sestavy){
+    if(!(s.kod||"").trim())continue;
+    for(const p of priplatkySestavy(s)){ if((s.vyp||{})[p.id])continue; m[p.id]=(m[p.id]||0)+1 }
+  }
+  return m;
+}
+/* Příplatky, které se liší od posledního exportu. znamo=false znamená, že se
+   ještě nikdy nic neposlalo a posílá se celá sada. */
+function zmenyPriplatku(){
+  const sn=D.priplatkyOdeslano, poc=priplatkyPocty(), radky=[];
+  for(const p of D.priplatky){
+    if(!poc[p.id])continue;
+    const nova=surPlati(p);
+    const stara=sn&&sn[p.id]!=null?Number(sn[p.id]):null;
+    if(sn&&stara===nova)continue;
+    radky.push({p,stara,nova,sestav:poc[p.id],param:paramPriplatku(p)});
+  }
+  radky.sort((a,b)=>Math.abs((b.nova||0)-(b.stara||0))-Math.abs((a.nova||0)-(a.stara||0)));
+  return {znamo:!!sn,radky};
+}
 /* Soubor s příplatky pro Shoptet — volá se z tlačítka i z okna přepočtu. */
-function exportPriplatku(){
+function exportPriplatku(tichy){
     const pary=new Set();
     for(const s of D.sestavy)for(const p of priplatkySestavy(s))if(!(s.vyp||{})[p.id])pary.add(paramPriplatku(p));
     const sl=[...pary].sort();
@@ -4950,7 +5039,8 @@ function exportPriplatku(){
       for(const k of kody)rows.push([k,pairProKod(k,s),...bunky]);
     }
     dl(`shoptet-priplatky-${dnes()}-${rows.length-1}variant.csv`,csv(rows),"text/csv");
-    toast(rows.length-1+" řádků"+(bezKodu?"  ·  "+bezKodu+" sestav bez kódu vynecháno":""));
+    if(!tichy)toast(rows.length-1+" řádků"+(bezKodu?"  ·  "+bezKodu+" sestav bez kódu vynecháno":""));
+    return rows.length-1;
   }
 function vsePotvrd(csvTaky,vseSoubory){
   const A=vseCache, r=provedVse(); if(!r)return;
@@ -6482,6 +6572,81 @@ document.addEventListener("click",e=>{
     cenyCache=null;$("#modal").hidden=true;renderSest();persist();
     toast(`${rows.length-1} variant`+(lvl?` · ${lvl} mění level, kategorie zvlášť`:"")+(drz.length?` · ${drz.length} drží cenu`:""));
     return}
+  if(t.id==="expVse"){zobrazExportVse();return}
+  if(t.id==="exVseZrus"){exVseCache=null;$("#modal").hidden=true;return}
+  if(t.id==="exVseOk"){
+    if(!exVseCache)return;
+    const L=exVseCache.L, PR=exVseCache.PR;
+    const vse=!!(($("#exVsechny")||{}).checked);
+    const vyb=[],drz=[];
+    L.forEach((x,i)=>{const ch=$(`[data-ex="${i}"]`); (ch&&ch.checked?vyb:drz).push(x)});
+    /* Odškrtnutá sestava si drží cenu, kterou na e-shopu má. */
+    for(const x of drz)if(x.stara!==null)x.s.drzena=x.stara;
+    const rows=[["code","pairCode","price"]], rowsK=[]; let KATmax=0,lvl=0,sest=0;
+    const hotove=new Set();
+    for(const x of vyb){
+      const V=varianty(x.s), zmenaLvl=meniLevel(x.s,x.nova);
+      /* Držená sestava posune všechny varianty o stejný rozdíl, ať si drží
+         odstupy mezi skříněmi. */
+      const posun=x.vypocet!=null?(x.nova-x.vypocet):0;
+      for(const kod of x.kody){
+        const v=variantaProKod(x.s,V,kod);
+        rows.push([kod,pairProKod(kod,x.s),String(Math.round((v?v.cenaProdej:spocti(x.s).prodej)+posun))]);
+        if(zmenaLvl&&(x.s.kategorie||[]).length){
+          const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLevel(x.nova),y):y);
+          rowsK.push([kod,pairProKod(kod,x.s),...kat]);
+          if(kat.length>KATmax)KATmax=kat.length;
+        }
+      }
+      if(zmenaLvl)lvl++;
+      x.s.excel=x.nova; if(x.s.drzena!=null)x.s.drzena=x.nova;
+      hotove.add(x.s.id); sest++;
+    }
+    /* Přetlačení celého katalogu — sestavy, které se neliší. Držené se vynechají,
+       ty mají na e-shopu cenu, kterou tam mít chceš. */
+    if(vse)for(const s of D.sestavy){
+      const kody=(s.kod||"").split(",").map(y=>y.trim()).filter(Boolean);
+      if(!kody.length||hotove.has(s.id)||s.drzena!=null)continue;
+      const V=varianty(s), c=spocti(s); let nej=null;
+      for(const kod of kody){
+        const v=variantaProKod(s,V,kod);
+        const cenaK=Math.round(v?v.cenaProdej:c.prodej);
+        rows.push([kod,pairProKod(kod,s),String(cenaK)]);
+        if(nej===null||cenaK<nej)nej=cenaK;
+      }
+      if(nej!==null){s.excel=nej;sest++}
+    }
+    const nCeny=rows.length-1;
+    if(nCeny)dl(`shoptet-ceny-${dnes()}-${sest}sestav-${nCeny}variant.csv`,csv(bezNulovychCen(rows)),"text/csv");
+    /* Příplatky jdou vždy celou sadou — posílají se, když se něco hnulo, když
+       se ještě nikdy neposlaly, nebo když se přetlačuje celý katalog. */
+    const posliPr=!PR.znamo||PR.radky.length>0||vse;
+    const nPr=posliPr?exportPriplatku(true):0;
+    if(posliPr)D.priplatkyOdeslano=snapPriplatky();
+    let nKat=0;
+    if(rowsK.length){
+      const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
+      dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
+        csv([["code","pairCode",...cols],...rowsK.map(r=>[r[0],r[1],...cols.map((_,i)=>r[2+i]||"")])]),"text/csv");
+      nKat=rowsK.length;
+    }
+    exVseCache=null; renderSest(); persist();
+    const kroky=[];
+    if(nCeny)kroky.push(`Importuj <strong>shoptet-ceny-…csv</strong> — ${nCeny} variant u ${sest} sestav.`);
+    if(nPr)kroky.push(`Importuj <strong>shoptet-priplatky-…csv</strong> — ${nPr} řádků, celá sada příplatků.`);
+    if(nKat)kroky.push(`Importuj <strong>shoptet-kategorie-…csv</strong> — ${nKat} variant mění cenový level. Nikdy ve stejném souboru s cenami.`);
+    $("#mTitle").textContent=kroky.length?"Staženo — co teď ve Shoptetu":"Nebylo co posílat";
+    $("#mBody").innerHTML=kroky.length?`
+      <ol style="font-size:13px;line-height:1.7;margin:0 0 10px;padding-left:20px">
+        ${kroky.map(x=>`<li>${x}</li>`).join("")}</ol>
+      <p class="hint" style="margin:0 0 4px">Import ve Shoptetu jen přepisuje, co je v souboru. Produkty, které v něm nejsou, zůstanou nedotčené.</p>
+      ${sest?`<p class="hint" style="margin:0">${sest===1?"1 sestava je zapsaná jako nahraná na e-shop":sest+" sestav je zapsaných jako nahrané na e-shop"}${drz.length?`, ${drz.length} ${drz.length===1?"drží":"jich drží"} cenu`:""}.</p>`:""}
+      <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+        <button class="btn btn-sm btn-primary" id="exVseZrus">Zavřít</button></div>`
+      :`<p style="margin:0 0 10px;font-size:13px">Ceny sestav i příplatky sedí s e-shopem a žádná sestava nemění level. Nic se nestáhlo.</p>
+      <div class="row" style="gap:8px;justify-content:flex-end">
+        <button class="btn btn-sm btn-primary" id="exVseZrus">Zavřít</button></div>`;
+    return}
   if(t.id==="expNavod"){
     $("#mTitle").textContent="Jak exportovat na e-shop";
     $("#mBody").innerHTML=`
@@ -6499,20 +6664,19 @@ document.addEventListener("click",e=>{
       <p style="margin:0 0 10px">Tlačítko <strong>Stáhnout ↓ pro Shoptet</strong> na kartě té sestavy.
       Stáhne ceny, příplatky a kategorie jen tehdy, když se mění cenový level.</p>
 
-      <h3 style="font-size:13px;margin:14px 0 4px">Změnil jsem cenu komponenty</h3>
-      <p style="margin:0 0 10px">Dotkne se všech sestav, které ji mají v základu — použij
-      <strong>Stáhnout ceny ↓ pro Shoptet</strong>. Vezme všechny sestavy najednou, kromě těch s drženou cenou.
-      Co odejde do souboru, si kalkulačka zapíše jako cenu, která je na e-shopu — <em>Změny cen ↓</em> je proto
-      příště už nenabídne. Platí to i pro <em>Všechny ceny ↓</em>, takže ten soubor opravdu importuj.</p>
-
-      <h3 style="font-size:13px;margin:14px 0 4px">Změnil jsem cenu komponenty v příplatku</h3>
-      <p style="margin:0 0 10px">Cena sestavy se nemění, mění se cena příplatku. Použij
-      <strong>Stáhnout příplatky ↓ pro Shoptet</strong>. Ten jede vždy přes všechny sestavy, jinak by se
-      hodnoty parametru na e-shopu rozešly.</p>
+      <h3 style="font-size:13px;margin:14px 0 4px">Změnil jsem cokoliv — cenu komponenty, reprodukční cenu, marži</h3>
+      <p style="margin:0 0 10px">Vždycky jedno tlačítko: <strong>Stáhnout vše pro Shoptet ↓</strong>.
+      Okno ukáže, co se na e-shopu změní — ceny sestav, příplatky a cenové levely — a stáhne jen ty soubory,
+      které mají co posílat. Co odejde, si kalkulačka zapíše jako cenu, která je na e-shopu, a příště už ti to
+      nenabídne. Proto ten soubor opravdu importuj.</p>
+      <p style="margin:0 0 10px">Zaškrtávátko <em>poslat i sestavy, které se neliší</em> přetlačí celý katalog.
+      Hodí se, když se e-shop rozejde s kalkulačkou — jinak ho nech být.</p>
+      <p style="margin:0 0 10px">Cena sestavy se nemusí hnout vůbec, a přesto se změní příplatky —
+      třeba když zdražíš paměť, která je jen v příplatku. Okno to pozná a soubor s příplatky nabídne samo.</p>
 
       <h3 style="font-size:13px;margin:14px 0 4px">Po naskladnění</h3>
-      <p style="margin:0 0 10px">Okno naskladnění ti samo nabídne CSV jen za sestavy, kterým se cena hnula,
-      a necháš si odškrtnout ty, kde chceš cenu držet.</p>
+      <p style="margin:0 0 10px">Tlačítko <strong>Potvrdit a stáhnout vše pro Shoptet</strong> naskladní
+      a rovnou otevře stejné okno. Sestavy, u kterých chceš držet cenu, si odškrtneš v něm.</p>
 
       <h3 style="font-size:13px;margin:14px 0 4px">Pořadí při nahrávání</h3>
       <ol style="margin:0 0 10px;padding-left:20px">
@@ -6859,7 +7023,9 @@ document.addEventListener("click",e=>{
   if(t.id==="vseZrus"){vseCache=null;$("#modal").hidden=true}
   if(t.id==="vseOk"){vsePotvrd(false)}
   if(t.id==="vseCsv"){vsePotvrd(true)}
-  if(t.id==="vseVse"){vsePotvrd(true,true)}
+  /* Stejná cesta jako hlavní tlačítko — naskladní, zavře okno a rovnou ukáže,
+     co půjde na e-shop. */
+  if(t.id==="vseVse"){vsePotvrd(false);zobrazExportVse()}
   if(t.id==="nkSklad"){zobrazZaskladneni()}
   if(t.id==="zaskZrus"){$("#modal").hidden=true}
   if(t.id==="zaskOk"){provedZaskladneni()}
