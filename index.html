@@ -1387,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=243;
+const VERZE=244;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -5315,12 +5315,18 @@ function nbSoucet(n){
 function textProZakaznika(n){
   const S=nbSoucet(n), L=[];
   L.push("Dobrý den,");L.push("");L.push("děkuji za poptávku. Nabízím tuto sestavu:");L.push("");
+  let win="";
   for(const r of n.radky){
     const k0=r.kompId?najdiKomp(r.kompId):null;
     const nm=(r.zakaznik||"").trim()||(k0?konkretniModel(k0):(r.produkt||"").trim());
     if(!nm)continue;
+    /* Windows se nevypisuje jako položka — jde na konec jednou větou o systému,
+       ať je to v každé nabídce stejně. Edice se bere z té položky. */
+    if(/windows/i.test(nm)){ if(!win)win=/home/i.test(nm)?"Windows 11 Home":"Windows 11 Pro"; continue }
     L.push("• "+(r.kat?r.kat+": ":"")+nm+((Number(r.ks)||1)>1?"  ("+r.ks+"×)":""));
   }
+  /* Systém je vždycky poslední odrážka konfigurace, i když v položkách není. */
+  L.push("• OS: "+(win||"Windows 11 Pro")+" - nainstalováno, aktivováno");
   /* náhrada se zmiňuje jen tam, kde ji Lukáš vědomě označí */
   const nahrady=n.radky.filter(r=>r.nahrada&&r.chce);
   if(nahrady.length){ L.push(""); L.push("Poznámky:");
@@ -5329,6 +5335,7 @@ function textProZakaznika(n){
   L.push("");L.push("Počítač dodávám sestavený, otestovaný, s nainstalovaným systémem,");
   L.push("aktualizovaným BIOSem a ovladači — stačí zapnout a hrát.");
   if(n.pozn){L.push("");L.push(n.pozn)}
+  L.push("");L.push("Záruka 3 roky.");
   L.push("");L.push("S pozdravem");
   return L.join("\n");
 }
