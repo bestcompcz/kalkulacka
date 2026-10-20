@@ -1387,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=245;
+const VERZE=246;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3273,22 +3273,32 @@ function faktRadek(kod,tail){
   const pred=tok.slice(0,vi), za=tok.slice(vi+1);
   let ui=-1; for(let i=pred.length-1;i>=0;i--)if(/^\d[\d\s\u00a0]*,\d+$/.test(pred[i])){ui=i;break}
   if(ui<1)return null;
-  const zaklad=fcis(pred[ui]);
-  let qi=ui-1; if(/^ks$/i.test(pred[qi]||""))qi--;
-  if(qi<0||!/^\d+$/.test(pred[qi]))return null;
-  const ks=+pred[qi]; if(!(ks>0)||!(zaklad>0))return null;
-  const popis=pred.slice(0,qi).join(" ").replace(/[,;]\s*$/,"").trim();
+  /* Tisíce odděluje mezera, takže "1 025,00" přijde jako dva tokeny — ale
+     "30 320,25" je množství 30 a cena 320,25. Z textu se to rozhodnout nedá,
+     tak se zkusí obě čtení a vyhraje to, které sedí s částkou na konci řádku. */
+  const varianty=[];
+  const pridej=(zaklad,qi0)=>{
+    let qi=qi0; if(/^ks$/i.test(pred[qi]||""))qi--;
+    if(qi<0||!/^\d+$/.test(pred[qi]))return;
+    const ks=+pred[qi];
+    if(!(ks>0)||!(zaklad>0))return;
+    varianty.push({ks,zaklad,qi});
+  };
+  pridej(fcis(pred[ui]),ui-1);
+  if(ui>=2&&/^\d{1,3}$/.test(pred[ui-1])&&/^\d{3},\d+$/.test(pred[ui]))
+    pridej(fcis(pred[ui-1]+pred[ui]),ui-2);
   let nej=null;
-  for(const c of faktCteni(za)){
+  for(const v of varianty)for(const c of faktCteni(za)){
     const celkem=c[c.length-1]; if(!(celkem>0))continue;
-    const jedn=Math.round(celkem/ks*100)/100;
-    if(Math.abs(jedn*ks-celkem)>0.005)continue;
-    const odch=Math.abs(jedn-zaklad)/zaklad; if(odch>0.15)continue;
-    if(!nej||odch<nej.odch)nej={celkem,jedn,odch};
+    const jedn=Math.round(celkem/v.ks*100)/100;
+    if(Math.abs(jedn*v.ks-celkem)>0.005)continue;
+    const odch=Math.abs(jedn-v.zaklad)/v.zaklad; if(odch>0.15)continue;
+    if(!nej||odch<nej.odch)nej={celkem,jedn,odch,ks:v.ks,zaklad:v.zaklad,qi:v.qi};
   }
   if(!nej)return null;
-  return {kod,popis,ks,cena:nej.jedn,zaklad,celkem:nej.celkem,
-    poplatek:Math.round((nej.jedn-zaklad)*100)/100};
+  const popis=pred.slice(0,nej.qi).join(" ").replace(/[,;]\s*$/,"").trim();
+  return {kod,popis,ks:nej.ks,cena:nej.jedn,zaklad:nej.zaklad,celkem:nej.celkem,
+    poplatek:Math.round((nej.jedn-nej.zaklad)*100)/100};
 }
 /* Z celé faktury vytáhne číslo dokladu, datum vystavení a součty.
    Součty se pak porovnají s tím, co se přečetlo z řádků — to je kontrola,
@@ -3401,7 +3411,16 @@ function naparujFakturu(pol,dodavatel,bezDph,datum){
       let sk=0;
       if(kompId&&n.komp===kompId)sk+=2;
       /* Part number z faktury v názvu nákupu je silnější signál než slova. */
-      if(x.part&&norm3(n.popis).includes(norm3(x.part)))sk+=2;
+      const partSedi=!!(x.part&&norm3(n.popis).includes(norm3(x.part)));
+      if(partSedi)sk+=2;
+      /* Nákup starší než měsíc se bere jen tehdy, když sedí part number. V datech
+         leží spousta dávno nevyfakturovaných nákupů a podobný název stačil na to,
+         aby si faktura sáhla na jiný model z léta — splatnost u ATC je 21 dní,
+         takže faktura k měsíc starému nákupu je samo o sobě podezřelé. */
+      if(datum&&n.datum&&!partSedi){
+        const stari=(Date.parse(datum+"T00:00:00Z")-Date.parse(String(n.datum)+"T00:00:00Z"))/86400000;
+        if(isFinite(stari)&&stari>30)continue;
+      }
       const a=norm3(n.popis).split(" "), b=norm3(x.popis).split(" ");
       const spol=b.filter(w=>a.includes(w)).length/Math.max(b.length,1);
       sk+=spol*2;
