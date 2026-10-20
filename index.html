@@ -1387,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=244;
+const VERZE=245;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4907,11 +4907,11 @@ function zobrazVse(){
     <h3 style="margin:0 0 6px;font-size:13px">3 · Ceny sestav${A.sest.length?" — "+A.sest.length:" — beze změny"}</h3>
     ${A.sest.length?`<p class="hint" style="margin:0 0 8px">Zaškrtnuté ceny půjdou do CSV pro Shoptet. Odškrtnutá sestava si drží cenu, kterou má na e-shopu, a příště přijde odškrtnutá s poznámkou.</p>
       <div class="tbl"><table><thead><tr><th style="width:26px"></th><th>Sestava</th><th>Varianty</th><th>Proč</th></tr></thead><tbody>
-      ${A.sest.map((g,i)=>`<tr${g.lvlZmena?' style="background:#FFFBF5"':''}>
+      ${A.sest.map((g,i)=>`<tr${(g.lvlZmena||meniLevel(g.s,g.nejPo))?' style="background:#FFFBF5"':''}>
         <td><input type="checkbox" class="vseChk" data-i="${i}" ${g.drzena==null?"checked":""}></td>
         <td><strong>${esc(g.s.nazev)}</strong>
             ${g.drzena!=null?`<div style="font-size:11px;color:var(--signal)">držená cena ${kc(g.drzena)}, výpočet ${kc(g.nejPo)}</div>`:""}
-            ${g.lvlZmena?`<div style="font-size:11px;color:var(--bad);font-weight:600">mění se cenový level → ${esc(g.lvlZmena[1].split(">").pop().trim())}, kategorie posílej zvlášť</div>`:""}</td>
+            ${(g.lvlZmena||meniLevel(g.s,g.nejPo))?`<div style="font-size:11px;color:var(--bad);font-weight:600">mění se cenový level → ${esc((g.lvlZmena?g.lvlZmena[1]:novyLevel(g.nejPo)).split(">").pop().trim())}, kategorie posílej zvlášť</div>`:""}</td>
         <td style="font-size:11.5px">${g.radky.map(r=>`<div class="num">${esc(r.kod)} &nbsp; ${sipka(r.pred,r.po)}</div>`).join("")}</td>
         <td style="font-size:11px;color:var(--ink-2)">${g.duvod.map(esc).join("<br>")||"—"}</td></tr>`).join("")}
       </tbody></table></div>`:""}
@@ -4922,15 +4922,21 @@ function zobrazVse(){
     <div class="tbl"><table><thead><tr><th>Sestava</th><th class="r" style="width:92px">E-shop</th>
       <th class="r" style="width:92px">Nově</th><th class="r" style="width:72px">Rozdíl</th>
       <th class="r" style="width:58px">Variant</th><th>Které</th></tr></thead><tbody>
-      ${A.doplnek.map(x=>`<tr${x.jenLevel?' style="background:#FFFBF5"':''}>
+      ${A.doplnek.map(x=>{
+        /* Level se porovnává s kategorií, kterou má produkt na e-shopu, ne se stavem
+           před naskladněním. Sestava, která zdražením přeskočí hranici pásma, musí
+           hlásit level i tehdy, když se jí mění cena — dřív se to psalo jen u těch,
+           kterým cena seděla a měnil se pouze level. */
+        const mL=meniLevel(x.s,x.nova);
+        return `<tr${mL?' style="background:#FFFBF5"':''}>
         <td><strong>${esc(((x.s.kod||"").split(",")[0].trim().split("/")[0])||"—")}</strong>&nbsp; ${esc(x.s.nazev)}
           ${x.drzena?`<div style="font-size:11px;color:var(--signal)">držená cena</div>`:""}
-          ${x.jenLevel?`<div style="font-size:11px;color:var(--bad);font-weight:600">cena sedí, mění se jen cenový level — kategorie posílej zvlášť</div>`:""}</td>
+          ${mL?`<div style="font-size:11px;color:var(--bad);font-weight:600">${x.jenLevel?"cena sedí, mění se jen cenový level":"mění se i cenový level"} → ${esc(novyLevel(x.nova).split(">").pop().trim())}, kategorie posílej zvlášť</div>`:""}</td>
         <td class="r num">${x.stara!=null?kc(x.stara):"—"}</td>
         <td class="r num" style="font-weight:600">${kc(x.nova)}</td>
         <td class="r num" style="color:${x.stara==null?"var(--ink-3)":(x.nova>x.stara?"var(--bad)":"var(--ok)")}">${x.stara==null?"—":(x.nova>x.stara?"+":"")+Math.round(x.nova-x.stara)}</td>
         <td class="r num">${x.kodyMimo.length}</td>
-        <td style="font-size:11px;color:var(--ink-2)">${esc(x.kodyMimo.join(", "))}</td></tr>`).join("")}
+        <td style="font-size:11px;color:var(--ink-2)">${esc(x.kodyMimo.join(", "))}</td></tr>`}).join("")}
       </tbody></table></div></div>`:""}
   <div style="margin-top:16px">
     <h3 style="margin:0 0 6px;font-size:13px">4 · Ceny příplatků${A.pripl.length?" — "+A.pripl.length+" se mění":" — beze změny"}</h3>
@@ -5421,6 +5427,7 @@ function exportSestavy(id){
       const rk=[["code","pairCode",...cols]];
       for(const kod of kody)rk.push([kod,pairProKod(kod,s),...seznam]);
       dl(`shoptet-${zaklad}-kategorie-${dnes()}.csv`,csv(rk),"text/csv");
+      s.kategorie=seznam; persist();   // odeslaný level je od teď stav e-shopu
       katHlaska="POZOR: level se mění na "+novyLvl.split(">").pop().trim()+", nahraj i kategorie";
     }
   }
@@ -6592,7 +6599,7 @@ document.addEventListener("click",e=>{
     const rows=[["code","pairCode","price"]], rowsK=[]; let KATmax=0,lvl=0,sest=0;
     const hotove=new Set();
     for(const x of vyb){
-      const V=varianty(x.s), zmenaLvl=meniLevel(x.s,x.nova);
+      const V=varianty(x.s), zmenaLvl=meniLevel(x.s,x.nova); let novaKat=null;
       /* Držená sestava posune všechny varianty o stejný rozdíl, ať si drží
          odstupy mezi skříněmi. */
       const posun=x.vypocet!=null?(x.nova-x.vypocet):0;
@@ -6603,8 +6610,12 @@ document.addEventListener("click",e=>{
           const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLevel(x.nova),y):y);
           rowsK.push([kod,pairProKod(kod,x.s),...kat]);
           if(kat.length>KATmax)KATmax=kat.length;
+          novaKat=kat;
         }
       }
+      /* Stejně jako u ceny: co odešlo do souboru, je od teď stav e-shopu. Jinak by
+         sestava hlásila změnu levelu pořád dokola, dokud se nenačte export produktů. */
+      if(novaKat)x.s.kategorie=novaKat;
       if(zmenaLvl)lvl++;
       x.s.excel=x.nova; if(x.s.drzena!=null)x.s.drzena=x.nova;
       hotove.add(x.s.id); sest++;
