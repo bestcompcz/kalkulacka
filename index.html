@@ -1387,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=246;
+const VERZE=247;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2713,6 +2713,10 @@ const STARE_PRIPLATKY={
   /* Mapuje se na vnitřní název příplatku, ne na e-shopový — ten se mění podle toho,
      jaké desky se zrovna prodávají (ATX / mATX). */
   "b550m tuf gaming atx":"z A520 na B550 TUF ATX",
+  /* Dřívější název s ATX na konci. Který ze dvou příplatků na B550 TUF to je,
+     se podle textu rozhodnout nedá — ale oba mají stejnou cílovou desku a původní
+     se bere ze sestavy, takže na rozpadu ani na marži to nic nemění. */
+  "za b550 tuf gaming atx":"z A520 na B550 TUF ATX",
 };
 function najdiPriplatek(txt){
   const n=x=>String(x||"").replace(/[\s.]+/g," ").trim().toLowerCase();
@@ -2732,10 +2736,28 @@ function skrinZNazvu(txt){
   if(/fractal|north/.test(t))zaklad="Fractal North";
   else if(/\bxr\b/.test(t))zaklad="Montech XR";
   else if(/\bx3\b|\bx4\b/.test(t))zaklad="Montech X3";
-  if(!zaklad)return null;
-  if(bily)return zaklad+" White";
-  if(cerny)return zaklad+" Black";
-  return null;
+  if(zaklad){
+    if(bily)return zaklad+" White";
+    if(cerny)return zaklad+" Black";
+    return null;
+  }
+  /* Cokoliv dalšího se hledá přímo v ceníku — tak projdou i skříně koupené
+     jednorázově (NZXT, DeepCool, DarkFlash), jakmile je Lukáš založí. */
+  const slova=norm3(t).split(" ").filter(Boolean);
+  let nej=null,nejS=0;
+  for(const k of (D.komponenty["Skříň"]||[])){
+    const w=norm3(k.nazev).split(" ").filter(Boolean); if(!w.length)continue;
+    const shoda=w.filter(x=>slova.includes(x)).length/w.length;
+    if(shoda>=0.6&&(shoda>nejS||(shoda===nejS&&nej&&k.nazev.length>nej.length))){nejS=shoda;nej=k.nazev}
+  }
+  return nej;
+}
+/* Název skříně z varianty objednávky — i když v ceníku není. Když se nenapáruje,
+   nesmí se tiše vzít skříň z kódu: odepsala by se jiná, než která v počítači je. */
+function skrinZVarianty(r){
+  const txt=String((r&&(r.orderItemVariantName??r.itemVariantName))||"");
+  const m=txt.match(/sk[řr][íi][ňn]\s*:\s*(.+)$/i);
+  return m?m[1].trim():"";
 }
 function skrinZRadku(r,kod){
   const zN=skrinZNazvu(r&&(r.orderItemVariantName??r.itemVariantName));
@@ -2929,6 +2951,13 @@ function kOdpisu(txt){
     const barva=barvaZeSkrine(skrNazev);
     const m=rozpadSestavy(s,kod,poc,skrNazev);
     let pot="", info="";
+    /* Skříň z varianty, kterou ceník nezná, znamená ručně postavený kus. Odepsat
+       podle kódu by sebralo ze skladu jinou skříň, než která v počítači je. */
+    const skrVar=skrinZVarianty(r);
+    if(skrVar&&!skrinZNazvu(skrVar)){
+      pot+=" ⚠ skříň „"+skrVar+"“ není v ceníku";
+      chyby.push("skříň „"+skrVar+"“ u objednávky "+C+" ("+kod+")");
+    }
     const chlPrip=[], chlCpu=[];   // chladiče z příplatku na chlazení a chladiče v ceně výměny CPU
     /* Příplatků může být víc než čtyři — export jich nese tolik, kolik má objednávka. */
     for(let i=1;i<=20;i++){
@@ -4269,6 +4298,9 @@ function vyhodnotObdobi(txt,od,doData){
         pc+=poc;
         const skr=skrinZRadku(r,kod);                       // pravidlo 2: skříň z přípony kódu
         const bar=barvaZeSkrine(skr);
+        const skrVar=skrinZVarianty(r);
+        if(skrVar&&!skrinZNazvu(skrVar))
+          chyby.push("skříň „"+skrVar+"“ u objednávky "+(r.code||"")+" ("+kod+") není v ceníku");
         const m=rozpadSestavy(s,kod,poc,skr);
         const chlPrip=[],chlCpu=[];
         for(let i=1;i<=20;i++){
@@ -4348,7 +4380,7 @@ function renderVyhodnoceni(){
   if(R.chyby.length){
     stav.textContent="";
     vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
-      <strong>Nenapárované příplatky — výpočet zastaven.</strong> Dokud nevím, co se pod nimi osadilo,
+      <strong>Nenapárované položky — výpočet zastaven.</strong> Dokud nevím, co se pod nimi osadilo,
       nemůžu spočítat nákup:<br>${R.chyby.map(esc).join("<br>")}</div>`;
     return}
   /* Prodané zboží, u kterého se nenašla nákupní cena a není to počítač ani
