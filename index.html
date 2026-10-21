@@ -1387,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=248;
+const VERZE=250;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4284,13 +4284,27 @@ function vyhodnotObdobi(txt,od,doData){
   const obj=new Map();
   for(const r of radky){
     const c=String(r.code||"").trim(); if(!c)continue;
-    if(!obj.has(c))obj.set(c,{code:c,den:String(r.date||"").slice(0,10),
-      valuta:String(r.currencyCode||"CZK"),kurz:Number(String(r.currencyExchangeRate||1).replace(",","."))||1,rad:[]});
+    if(!obj.has(c)){
+      /* Export nese u objednávky částku s DPH i bez. Z poměru se pozná, jestli
+         šlo o prodej s českou DPH, nebo bez ní (vývoz na Slovensko s DIČ).
+         Dělit tržbu jednadvacítkou i tam, kde žádná DPH nebyla, podsekne marži
+         o pětinu — u 60tisícového počítače je to přes deset tisíc. */
+      const fc=x=>Number(String(x==null?"":x).replace(/[\s\u00a0]/g,"").replace(",","."))||0;
+      const sD=fc(r.totalPriceWithVat), bD=fc(r.totalPriceWithoutVat);
+      obj.set(c,{code:c,den:String(r.date||"").slice(0,10),
+        valuta:String(r.currencyCode||"CZK"),kurz:Number(String(r.currencyExchangeRate||1).replace(",","."))||1,
+        vatObj:(sD>0&&bD>0)?Math.max(1,Math.round(sD/bD*1000)/1000):0,rad:[]});
+    }
     obj.get(c).rad.push(r);
   }
-  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[];
+  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[], rozepsane=[];
   for(const o of obj.values()){
     if(od&&o.den<od)continue;
+    /* Obsahuje objednávka počítač? Podle toho se pozná rozepsaná cena. */
+    const maPC=o.rad.some(x=>{
+      const k=String(x.orderItemCode??x.itemCode??"").trim();
+      return k&&!!najdiSestavu(k);
+    });
     if(doData&&o.den>doData)continue;
     /* Pravidlo 7: v currencyExchangeRate je počet eur za korunu, takže se dělí. */
     const pre=v=>o.valuta!=="CZK"?v/o.kurz:v;
@@ -4368,6 +4382,11 @@ function vyhodnotObdobi(txt,od,doData){
             dopocteno.push({popis,cena,marze:Math.min(mar,cena/vat),
               pretoceno:(cena/vat)-mar<0});
           }
+          /* Položka bez kódu v objednávce, kde je i počítač — zákazník chtěl
+             fakturu rozepsat na víc řádků. Cena počítače je tím rozdělená, díly
+             se počítají jednou u sestavy, takže tahle část nákup nemá a marži
+             nenadhodnocuje. Jen se vypíše, ať je vidět, že se to stalo. */
+          else if(!kod&&maPC)rozepsane.push(popis+" · "+kc(cena));
           else if(!kod&&sluzbaBezNakupu(nz))bezNakupu.push(popis+" · "+kc(cena));
           else nenaparovane.push(popis+" · "+kc(cena));
         }
@@ -4377,11 +4396,15 @@ function vyhodnotObdobi(txt,od,doData){
     const dopravaMoje=Math.max(0,nakladZTabulky(doprText,0)-doprPlatil);
     /* Pravidlo 4: poplatek za platbu z celé objednávky, tedy zboží + doprava + služby. */
     const platNakl=nakladZTabulky(platText,trzba+doprPlatil+platPlatil);
-    const cista=(trzba-slevy-nakup-dopravaMoje-platNakl)/vat;
-    out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista});
+    /* Tržba se dělí DPH té objednávky, náklady českou sazbou — nákup, doprava
+       i poplatek za platbu jsou české ceny s DPH bez ohledu na to, komu se prodalo. */
+    const vatO=o.vatObj>0?o.vatObj:vat;
+    const trzbaBezObj=(trzba-slevy)/vatO;
+    const cista=trzbaBezObj-(nakup+dopravaMoje+platNakl)/vat;
+    out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista,trzbaBezObj,vatO});
   }
   out.sort((a,b)=>String(a.den).localeCompare(String(b.den))||a.code.localeCompare(b.code));
-  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny};
+  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny,rozepsane};
 }
 function renderVyhodnoceni(){
   /* Stažený archiv má přednost; ruční vstup z panelu výš slouží jako záloha. */
@@ -4414,7 +4437,7 @@ function renderVyhodnoceni(){
   const S=f=>L.reduce((a,x)=>a+f(x),0);
   const obrat=S(x=>x.trzba), sl=S(x=>x.slevy), nak=S(x=>x.nakup);
   const dopr=S(x=>x.dopravaMoje), plat=S(x=>x.platNakl), cista=S(x=>x.cista);
-  const trzbaBez=(obrat-sl)/VAT();
+  const trzbaBez=S(x=>x.trzbaBezObj);   // sečteno po objednávkách, každá se svou sazbou
   const pct=trzbaBez?100*cista/trzbaBez:0;
   /* po dnech */
   const dny=new Map();
@@ -4502,6 +4525,10 @@ function renderVyhodnoceni(){
     ${R.bezNakupu.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Položky bez nákupní ceny</strong> — v marži jsou jako čistý zisk, takže je o jejich nákup nadhodnocená:
       <br>${R.bezNakupu.map(esc).join("<br>")}</div>`:""}
+    ${R.rozepsane.length?`<div style="background:#EAF0FB;border:1px solid #CBD9EF;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>Rozepsaná cena počítače</strong> — řádek bez kódu v objednávce, kde je i sestava. Díly se počítají
+      jednou u té sestavy, takže je to jen druhá část téže ceny, ne služba navíc:
+      <br>${R.rozepsane.map(esc).join("<br>")}</div>`:""}
     <div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div style="flex:1 1 280px;min-width:260px">
         <div style="font-size:12.5px;font-weight:700;margin-bottom:4px">Po dnech</div>
