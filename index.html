@@ -1387,7 +1387,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=247;
+const VERZE=248;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2759,9 +2759,20 @@ function skrinZVarianty(r){
   const m=txt.match(/sk[řr][íi][ňn]\s*:\s*(.+)$/i);
   return m?m[1].trim():"";
 }
+/* Jednorázová skříň, která se do ceníku nezakládá. Stačí jedna komponenta
+   „Skříň na míru" v kategorii Skříň — nejlíp s neomezeným skladem, ať se nesleduje
+   stav. Do nákupu se započítá její cena, ze skladu se nebere nic a hlavně se
+   neodepíše skříň z kódu varianty. */
+function skrinNaMiru(){
+  for(const k of (D.komponenty["Skříň"]||[]))
+    if(/na m[íi]ru|custom|mimo cen[íi]k/i.test(k.nazev||""))return k.nazev;
+  return null;
+}
 function skrinZRadku(r,kod){
   const zN=skrinZNazvu(r&&(r.orderItemVariantName??r.itemVariantName));
   if(zN)return zN;
+  /* Varianta jmenuje skříň, kterou ceník nezná — ručně postavený kus. */
+  if(skrinZVarianty(r)){const nm=skrinNaMiru(); if(nm)return nm}
   const suf=String(kod||"").includes("/")?String(kod).split("/")[1]:null;
   return (suf&&SUF[suf])?SUF[suf]:null;
 }
@@ -2948,15 +2959,18 @@ function kOdpisu(txt){
       continue;
     }
     const skrNazev=skrinZRadku(r,kod);
-    const barva=barvaZeSkrine(skrNazev);
+    const barva=barvaZeSkrine(skrNazev)||barvaZeSkrine(skrinZVarianty(r));
     const m=rozpadSestavy(s,kod,poc,skrNazev);
     let pot="", info="";
     /* Skříň z varianty, kterou ceník nezná, znamená ručně postavený kus. Odepsat
        podle kódu by sebralo ze skladu jinou skříň, než která v počítači je. */
     const skrVar=skrinZVarianty(r);
     if(skrVar&&!skrinZNazvu(skrVar)){
-      pot+=" ⚠ skříň „"+skrVar+"“ není v ceníku";
-      chyby.push("skříň „"+skrVar+"“ u objednávky "+C+" ("+kod+")");
+      if(skrinNaMiru())info+=" skříň na míru: "+skrVar+" — ze skladu se nebere";
+      else{
+        pot+=" ⚠ skříň „"+skrVar+"“ ceník nezná";
+        chyby.push("skříň „"+skrVar+"“ u objednávky "+C+" ("+kod+") — založ ji, nebo si udělej komponentu „Skříň na míru“");
+      }
     }
     const chlPrip=[], chlCpu=[];   // chladiče z příplatku na chlazení a chladiče v ceně výměny CPU
     /* Příplatků může být víc než čtyři — export jich nese tolik, kolik má objednávka. */
@@ -4297,10 +4311,12 @@ function vyhodnotObdobi(txt,od,doData){
       if(s){
         pc+=poc;
         const skr=skrinZRadku(r,kod);                       // pravidlo 2: skříň z přípony kódu
-        const bar=barvaZeSkrine(skr);
+        /* U skříně na míru nese barvu text varianty, ne název komponenty. */
+        const bar=barvaZeSkrine(skr)||barvaZeSkrine(skrinZVarianty(r));
         const skrVar=skrinZVarianty(r);
-        if(skrVar&&!skrinZNazvu(skrVar))
-          chyby.push("skříň „"+skrVar+"“ u objednávky "+(r.code||"")+" ("+kod+") není v ceníku");
+        if(skrVar&&!skrinZNazvu(skrVar)&&!skrinNaMiru())
+          chyby.push("skříň „"+skrVar+"“ u objednávky "+(r.code||"")+" ("+kod+") ceník nezná"
+            +" — založ ji, nebo si udělej komponentu „Skříň na míru“");
         const m=rozpadSestavy(s,kod,poc,skr);
         const chlPrip=[],chlCpu=[];
         for(let i=1;i<=20;i++){
