@@ -509,6 +509,14 @@ tr.unused td{background:#FEFCFB}
     </tr></thead><tbody id="esSmlBody"></tbody></table></div>
   </div>
 
+  <div class="card" id="esOstatni" hidden style="margin-top:12px;border-color:#F0D9A8;background:#FEF8EC">
+    <div class="row" style="margin-bottom:6px"><strong>Ostatní pohyby Essoxu</strong>
+      <span class="muted" style="font-size:12px">Poplatky, provize a avíza, která nepatří k žádné smlouvě. Až je dohledáš v portálu, odklikni je.</span></div>
+    <div class="tbl"><table><thead><tr>
+      <th style="width:88px">Datum</th><th style="width:96px">Částka</th><th style="width:104px">VS</th>
+      <th style="width:150px">Protistrana</th><th>Zpráva</th><th style="width:40px"></th></tr></thead><tbody id="esOstBody"></tbody></table></div>
+  </div>
+
   <div class="card" id="esCekajici" hidden style="margin-top:12px;border-color:#F0D9A8;background:#FEF8EC">
     <div class="row" style="margin-bottom:6px"><strong>Platby bez smlouvy</strong>
       <span class="muted" style="font-size:12px">Nejčastěji smlouva z dřívějška. Nahraj starší výpis Essoxu a řádky se dopárují samy.</span></div>
@@ -846,6 +854,10 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(!Array.isArray(d.nabidky))d.nabidky=[];
   if(!Array.isArray(d.essox))d.essox=[];                  // smlouvy Essox s platbami
   if(!Array.isArray(d.essoxCekajici))d.essoxCekajici=[];  // platby, ke kterým zatím není smlouva
+  /* Essoxové pohyby, které ke smlouvě nepatří — poplatky, provize, avíza. Dřív se
+     jen spočítaly do „ostatní pohyby 3" a nikde nebyly vidět, takže se na ně
+     zapomnělo. Teď mají vlastní tabulku a odklikávají se, až je dohledáno. */
+  if(!Array.isArray(d.essoxOstatni))d.essoxOstatni=[];
   for(const n of d.nabidky){ if(n.marze===undefined)n.marze=6000; if(!Array.isArray(n.radky))n.radky=[];
     for(const r of n.radky){ if(r.zakaznik===undefined)r.zakaznik=""; if(r.nahrada===undefined)r.nahrada=false;
       if(r.dodavatel===undefined)r.dodavatel=""; if(r.odkaz===undefined)r.odkaz="";
@@ -1404,7 +1416,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=252;
+const VERZE=254;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7134,6 +7146,9 @@ document.addEventListener("click",e=>{
     }
     $("#modal").hidden=true;modelyId=null;renderKomp();renderSklad();persist();toast("Uloženo")}
   if(t.id==="pdCloud"){nactiProdejeZCloudu();return}
+  const eo=e.target.closest("[data-esost]");
+  if(eo){D.essoxOstatni=(D.essoxOstatni||[]).filter(x=>String(x.id)!==eo.dataset.esost);
+    renderEssox();persist();return}
   if(t.id==="dodOk"){ulozDodatecne();return}
   if(t.id==="dodZrus"){dodEdit=null;$("#modal").hidden=true;return}
   if(t.id==="dodDoplnM"){zobrazDodatecne(dodCekaM||[],"marze");return}
@@ -7412,6 +7427,14 @@ function esPrefixy(){ const p=new Set(["4006"]);
   return p}
 const esSmlouvaVs=(vs,pref)=>/^\d{10}$/.test(String(vs||""))&&(pref||esPrefixy()).has(String(vs).slice(0,4));
 const esOdEssoxu=t=>/essox/i.test(t.protistrana||"")||t.protiucet==="5994130217";
+/* Smlouva, ze které platba nepřijde — portál to píše ve stavu nebo v poznámce. */
+const ES_ZRUSENO=/rozmysl|zru[šs]|odstoup|neschv[áa]l|zam[íi]tnut|storn/i;
+const esZrusena=s=>ES_ZRUSENO.test(String(s.stav||"")+" "+String(s.pozn2||""));
+/* Smlouva, která nevznikla: portál ji má za zrušenou nebo rozmyšlenou a na účtu
+   k ní nikdy nic nepřišlo. Není to nedořešená smlouva, je to nic — do výčtu pro
+   účetní nepatří a faktura k ní nepatří taky ne. Filip Gabriel si místo Essoxu
+   vzal Home Credit, takže faktura 30 479 Kč s touhle smlouvou nesouvisí. */
+const esNerealizovana=s=>esZrusena(s)&&!(s.platby||[]).length;
 
 /* --------- parsery vstupních souborů --------- */
 /* csvRozdel() z Prodejů bere hlavičku z prvního řádku — výpis Essoxu i výpis
@@ -7442,7 +7465,8 @@ function esParseSmlouvy(txt){
     out.push({vs:o.CisloSmlouvy.replace(/\D/g,""),smlouva:o.CisloSmlouvy,
       klient:`${o.JmenoKlienta||""} ${o.PrijmeniKlienta||""}`.replace(/\s+/g," ").trim(),
       datum:esDatumCz(o.DatumPodpisuSmlouvy||o.DatumACasOdeslani),produkt:o.Produkt||"",
-      cena:esNum(o.PorizovaciCena),primaPlatba:esNum(o.PrimaPlatbaVKc),uver:esNum(o.VyseUveru)});
+      cena:esNum(o.PorizovaciCena),primaPlatba:esNum(o.PrimaPlatbaVKc),uver:esNum(o.VyseUveru),
+      stav:o.StavSmlouvy||"",pozn2:[o.Textbox8,o.Textbox6==="Ano"?"":""].filter(Boolean).join(" ").trim()});
   }
   return out}
 
@@ -7530,6 +7554,12 @@ function esZpracuj(){
   }
   /* faktura se hledá jen tam, kde ještě žádná není — ruční volbu nepřepisujeme */
   for(const s of mapa.values()){
+    /* K nerealizované smlouvě žádná faktura nepatří. Dohledanou automaticky
+       zahodíme, ruční zápis necháme — ten je Lukášovo rozhodnutí. */
+    if(esNerealizovana(s)){
+      if(s.faktura&&s.jistota!=="rucne"){s.faktura="";s.fakturaCastka=0;s.jistota="";s._novaFaktura=false}
+      continue;
+    }
     if(s.faktura)continue;
     const f=esNajdiFakturu(s,faktury);
     if(f)Object.assign(s,f,{_novaFaktura:true});
@@ -7573,12 +7603,27 @@ function esZapis(){
   D.essox=esCache.smlouvy.map(({_ulozena,_nova,_novaFaktura,...s})=>s)
     .sort((a,b)=>String(b.datum).localeCompare(String(a.datum)));
   D.essoxCekajici=esCache.cekajici.map(({_cekal,...t})=>t);
+  /* Starší měsíce zůstávají, dokud je Lukáš neodklikne jako dohledané. */
+  const ost=new Map((D.essoxOstatni||[]).map(t=>[t.id,t]));
+  for(const t of esCache.ostatni)ost.set(t.id,{...t});
+  D.essoxOstatni=[...ost.values()].sort((a,b)=>String(b.datum).localeCompare(String(a.datum)));
   const n=esCache.nove.length, f=esCache.smlouvy.filter(s=>s._novaFaktura).length; esCache=null; esVstup={smlouvy:null,banka:null,faktury:null,nazvy:{}};
   renderEssox(); persist();
   toast(n||f?`Zapsáno: ${n} plateb, ${f} faktur`:"Nic nového k zapsání");
 }
 
 /* --------- řádky přehledu pro účetní --------- */
+/* U faktury dohledané podle jména řekneme i proč je ke kontrole — nejčastěji
+   nesedí částka (SU4006463905: faktura 30 479 proti smlouvě 26 790). */
+function esShoda(s){
+  if(!s.faktura)return `<span style="color:var(--bad)">faktura nenalezena</span>`;
+  const c=Number(s.fakturaCastka)||0, p=Number(s.cena)||0;
+  const rozdil=c&&p&&Math.abs(c-p)>=1;
+  if(s.jistota==="kontrola"||rozdil)
+    return `<span style="color:var(--signal)">ke kontrole</span>`
+      +(rozdil?`<div class="muted" style="font-size:11px">faktura ${kc(c)} ≠ smlouva ${kc(p)}</div>`:"");
+  return "ok";
+}
 const ES_TYP={prima:"přímá platba",essox:"doplatek od Essoxu",
   essoxCela:"splátky celá částka od Essoxu",
   vratkaEssox:"vratka Essoxu (storno smlouvy)",vratkaKlient:"vratka klientovi"};
@@ -7599,6 +7644,9 @@ function esStav(s){
     if(Math.abs(sum)<1)return{txt:"stornováno",cls:"ok",rozdil:0,sum};
     if(sum<0)return{txt:"storno, příjem chybí",cls:"warn",rozdil:r,sum};   // platba přišla v měsíci, který není načtený
   }
+  /* Portál sám říká, že z téhle smlouvy platba nepřijde. Dřív taková smlouva
+     ležela v „nedořešeno" natrvalo (SU4006463905, klient si úvěr rozmyslel). */
+  if(esNerealizovana(s))return{txt:"nerealizováno",cls:"off",rozdil:0,sum};
   if(!sum)return{txt:"nic nepřišlo",cls:"bad",rozdil:-ceka,sum};
   if(!r)return{txt:"uhrazeno",cls:"ok",rozdil:0,sum};
   return r<0?{txt:`chybí ${kc(-r)}`,cls:"warn",rozdil:r,sum}:{txt:`přeplatek ${kc(r)}`,cls:"warn",rozdil:r,sum};
@@ -7643,13 +7691,28 @@ function renderEssox(){
           <td>${esc(s.klient)}</td><td class="num">${esc(s.vs)}</td>
           <td class="num">${s.faktura?esc(s.faktura):`<span style="color:var(--bad)">nenalezena</span>`}</td>
           <td>${ES_TYP[typ]||""}</td>
-          <td>${s.jistota==="kontrola"?`<span style="color:var(--signal)">ke kontrole</span>`:s.faktura?"ok":""}</td></tr>`}).join("");
+          <td>${esShoda(s)}</td></tr>`}).join("");
       const fakRows=esCache.smlouvy.filter(s=>s._novaFaktura&&!esCache.nove.some(p=>p.vs===s.vs)).map(s=>
         `<tr><td class="num">${esCz(s.datum)}</td><td class="num muted">—</td><td>${esc(s.klient)}</td>
           <td class="num">${esc(s.vs)}</td><td class="num">${esc(s.faktura)}</td>
           <td>doplnění faktury k uložené smlouvě</td>
-          <td>${s.jistota==="kontrola"?`<span style="color:var(--signal)">ke kontrole</span>`:"ok"}</td></tr>`).join("");
-      $("#esNahledBody").innerHTML=(rows+fakRows)||`<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--ink-3)">Nic nového — všechno už je zapsané.</td></tr>`;
+          <td>${esShoda(s)}</td></tr>`).join("");
+      /* Nová smlouva, která nevznikla. Ať je vidět, že se o ní ví a proč se nepočítá. */
+      const nereRows=esCache.smlouvy.filter(s=>s._nova&&esNerealizovana(s)).map(s=>
+        `<tr style="background:#F3F4F6"><td class="num">${esCz(s.datum)}</td>
+          <td class="num muted">—</td><td>${esc(s.klient)}</td><td class="num">${esc(s.vs)}</td>
+          <td class="num muted">—</td>
+          <td>smlouva nerealizována${s.pozn2?" — "+esc(s.pozn2):""}</td>
+          <td class="muted">nepočítá se</td></tr>`).join("");
+      /* Poplatky, provize a avíza Essoxu. Ke smlouvě nepatří, ale musí být vidět. */
+      const ostRows=esCache.ostatni.map(t=>
+        `<tr style="background:#FEF8EC"><td class="num">${esCz(t.datum)}</td>
+          <td class="num" style="${t.castka<0?"color:var(--bad)":""}">${kc(t.castka)}</td>
+          <td>${esc(t.protistrana||"Essox")}</td><td class="num">${esc(t.vs||"—")}</td>
+          <td class="num muted">—</td>
+          <td>nepatří ke smlouvě — ${t.castka>0?"provize za splátky od Essoxu":"poplatek nebo avízo Essoxu"}</td>
+          <td style="font-size:11.5px">${esc((t.zprava||"").slice(0,40))}</td></tr>`).join("");
+      $("#esNahledBody").innerHTML=(rows+fakRows+nereRows+ostRows)||`<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--ink-3)">Nic nového — všechno už je zapsané.</td></tr>`;
       const nov=esCache.smlouvy.filter(s=>s._nova).length;
       const fak=esCache.smlouvy.filter(s=>s._novaFaktura).length;
       $("#esNahledStav").innerHTML=`Nových plateb <strong>${esCache.nove.length}</strong> · nových smluv <strong>${nov}</strong>`
@@ -7677,17 +7740,17 @@ function renderEssox(){
      v tom měsíci přišla platba — jinak by řádek v přehledu neměl svůj protějšek */
   const sml=(D.essox||[]).filter(s=>!esObdobi||String(s.datum).slice(0,7)===esObdobi
     ||(s.platby||[]).some(p=>String(p.datum).slice(0,7)===esObdobi));
-  const potiz=sml.filter(s=>{const v=esStav(s);return v.cls!=="ok"}).length;
+  const potiz=sml.filter(s=>{const v=esStav(s);return v.cls!=="ok"&&v.cls!=="off"}).length;
   $("#esSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Plateb</div><div class="price" style="font-size:20px">${radky.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">Přijato</div><div class="price">${kc(prijato)}</div></div>
     ${vraceno?`<div><div class="muted" style="font-size:11.5px">Vratky</div><div class="price" style="font-size:20px;color:var(--bad)">${kc(vraceno)}</div></div>`:""}
-    <div><div class="muted" style="font-size:11.5px">Smluv</div><div class="price" style="font-size:20px">${sml.length}</div></div>
+    <div><div class="muted" style="font-size:11.5px">Smluv</div><div class="price" style="font-size:20px">${sml.filter(s=>!esNerealizovana(s)).length}</div></div>
     <div><div class="muted" style="font-size:11.5px">Nedořešeno</div><div class="price" style="font-size:20px;color:${potiz+(D.essoxCekajici||[]).length?"var(--bad)":"var(--ok)"}">${potiz+(D.essoxCekajici||[]).length}</div></div>`;
 
   /* smlouvy */
   $("#esSmlBody").innerHTML=sml.map(s=>{const v=esStav(s);
-    const barva=v.cls==="ok"?"var(--ok)":v.cls==="warn"?"var(--signal)":"var(--bad)";
-    return `<tr>
+    const barva=v.cls==="ok"?"var(--ok)":v.cls==="warn"?"var(--signal)":v.cls==="off"?"var(--ink-3)":"var(--bad)";
+    return `<tr${v.cls==="off"?' style="background:#F3F4F6;color:var(--ink-3)"':''}>
       <td class="num">${esCz(s.datum)}</td>
       <td class="num">${esc(s.smlouva)}</td>
       <td>${esc(s.klient)}</td>
@@ -7695,11 +7758,24 @@ function renderEssox(){
       <td class="num">${s.primaPlatba?kc(s.primaPlatba):"—"}</td>
       <td class="num">${kc(s.uver)}</td>
       <td class="num">${kc(v.sum)}</td>
-      <td style="color:${barva};font-weight:600">${v.txt}</td>
+      <td style="color:${barva};font-weight:600"${s.pozn2||s.stav?` title="${esc((s.stav||"")+(s.pozn2?" — "+s.pozn2:""))}"`:""}>${v.txt}${
+        s.pozn2?`<div class="muted" style="font-weight:400;font-size:11px">${esc(s.pozn2)}</div>`:""}</td>
       <td><input type="text" data-esfa="${esc(s.vs)}" value="${esc(s.faktura||"")}" placeholder="číslo faktury"
           style="width:92px" class="num">${s.jistota==="kontrola"?` <span title="Faktura dohledaná s nižší jistotou, zkontroluj" style="color:var(--signal)">!</span>`:""}</td>
     </tr>`}).join("")||`<tr><td colspan="9" style="padding:22px;text-align:center;color:var(--ink-3)">Žádná smlouva v tomhle období.</td></tr>`;
 
+  /* ostatní essoxové pohyby */
+  const ost=$("#esOstatni");
+  if(ost){
+    const l=D.essoxOstatni||[];
+    ost.hidden=!l.length;
+    if(l.length)$("#esOstBody").innerHTML=l.map(t=>`<tr>
+      <td class="num">${esCz(t.datum)}</td>
+      <td class="num" style="${t.castka<0?"color:var(--bad)":""}">${kc(t.castka)}</td>
+      <td class="num">${esc(t.vs||"—")}</td><td>${esc(t.protistrana||"")}</td>
+      <td style="font-size:12px">${esc(t.zprava||"")}</td>
+      <td><button class="btn btn-sm" data-esost="${esc(t.id)}" title="dohledáno, zahodit">×</button></td></tr>`).join("");
+  }
   /* čekající platby */
   const cek=$("#esCekajici");
   if(cek){
@@ -7832,8 +7908,10 @@ document.addEventListener("click",e=>{
       hlavicka:["datum","obdrženo","faktura celkem","číslo faktury","jméno","VS + essox číslo","pzn"],
       radky:esRadky(esObdobi).map(x=>[esCz(x.datum),r(x.castka),r(x.fakturaCastka),
         String(x.faktura||""),x.klient,String(x.vs),x.pozn])};
-    const sml=(D.essox||[]).filter(s=>!esObdobi||String(s.datum).slice(0,7)===esObdobi
-      ||(s.platby||[]).some(p=>String(p.datum).slice(0,7)===esObdobi));
+    /* Do výčtu pro účetní jdou jen smlouvy, které vznikly. Nerealizované
+       návrhy ani essoxové poplatky a provize (D.essoxOstatni) tam nepatří. */
+    const sml=(D.essox||[]).filter(s=>(!esObdobi||String(s.datum).slice(0,7)===esObdobi
+      ||(s.platby||[]).some(p=>String(p.datum).slice(0,7)===esObdobi))&&!esNerealizovana(s));
     const smlouvy={nazev:"Kontrola smluv",sirky:[10,15,24,11,13,11,11,20,13],
       hlavicka:["uzavřeno","smlouva","klient","cena","přímá platba","úvěr Essox","přijato","stav","faktura"],
       radky:sml.map(s=>{const v=esStav(s);
