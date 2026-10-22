@@ -404,6 +404,7 @@ tr.unused td{background:#FEFCFB}
   <div class="row" id="pdSum" style="gap:24px;margin-bottom:10px"></div>
   <div class="row" style="gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
     <button class="btn btn-sm btn-primary" id="pdCloud">↓ Načíst prodeje z cloudu</button>
+    <button class="btn btn-sm" id="pdDod">Dodatečné faktury</button>
     <span class="muted" style="font-size:12px" id="pdCloudStav">Objednávky, které robot stáhl ze Shoptetu</span>
   </div>
   <div id="pdDrop" style="border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;
@@ -858,6 +859,22 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   if(d.odpisyDo===undefined)d.odpisyDo=null;      // datum poslední odepsané objednávky
   if(d.odpisyOd===undefined)d.odpisyOd="2026-09-01";  // revize skladu — starší objednávky se neodepisují
   if(!Array.isArray(d.odpisyLog))d.odpisyLog=[];  // historie běhů
+  /* Dodatečné faktury. Objednávka bez kódu produktu, která doúčtovává upgrade
+     k počítači z jiné faktury. Z textu nejde poznat, co se vyměnilo, a hádat
+     první poznanou komponentu znamenalo plnou cenu v nákupu a špatný odpis:
+     u 20261250 se účtovala plná cena 32 GB DDR5 a deska, zdroj ani druhý disk
+     se nespočítaly nikde, u 20261282 plná cena 32 GB DDR4 místo rozdílu.
+     Klíč je objednávka + text položky, obsah seznam výměn {from,to};
+     prázdné from znamená díl, který se jen přidal. */
+  if(!d.dodatecne||typeof d.dodatecne!=="object"||Array.isArray(d.dodatecne))d.dodatecne={};
+  if(!d.dodatecneSeed){
+    const sd=(C,nazev,zmeny)=>{const k=dodKlic(C,nazev); if(!d.dodatecne[k])d.dodatecne[k]={nazev,zmeny}};
+    sd("20261250","dodatečné komponenty 32GB DDR5 + B650 + zdroj 850W + Microsoft Office licence + 1TB M2 Kingston NV3",
+      [{from:"4xw4efo",to:"j612u8f"},{from:"yiqicli",to:"o8f44k5"},
+       {from:"ja9yrfk",to:"8lmkx9w"},{from:"",to:"loxpxee"},{from:"",to:"i39qwvn"}]);
+    sd("20261282","příplatek za 32GB DDR4",[{from:"ewb9m9q",to:"idsagpv"}]);
+    d.dodatecneSeed=1;
+  }
   return d;}
 function initNaklady(d){
   if(!d.naklady)d.naklady=[];   // tabulka nákladů na dopravu a platby patří jen do dat
@@ -1387,7 +1404,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=250;
+const VERZE=252;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2897,6 +2914,12 @@ function rozpadSestavy(s,kod,poc,skrinNazev){
 }
 function kOdpisu(txt){
   const radky=csvRozdel(txt); const obj=[]; const suma=new Map(); const chyby=[]; const sluzby=[];
+  const dodChybi=[];
+  /* Objednávky, ve kterých je počítač. Tam je položka bez kódu rozepsaná část
+     ceny; jinde je to doúčtovaný upgrade k počítači z jiné faktury. */
+  const sPC=new Set();
+  for(const r0 of radky){const k0=String(r0.orderItemCode??r0.itemCode??"").trim();
+    if(k0&&najdiSestavu(k0))sPC.add(String(r0.code||""))}
   /* Objednávky, u kterých by šla osadit deska s integrovanou WiFi. Rozhodne se až
      po celém souboru — teprve tam je vidět, na kolik strojů desky vůbec vystačí. */
   const wifiKand=[];
@@ -2940,6 +2963,22 @@ function kOdpisu(txt){
          u něj komponentu podle názvu je nebezpečné: odečetl by se jeden disk místo
          celého počítače. */
       const nazevProdeje=r.orderItemName||r.itemName||"";
+      /* Dodatečná faktura: odečte se osazený díl a ten základní se vrátí na sklad,
+         protože ho už sebrala objednávka s počítačem v základní konfiguraci. */
+      const dz=!kod?dodZaznam(C,nazevProdeje):null;
+      if(dz){
+        for(const x of (dz.zmeny||[])){
+          if(x.to){pr(suma,x.to,poc);zaz(x.to,poc,den)}
+          if(x.from){const kf=najdiKomp(x.from);
+            if(kf&&!kf.neomezene)suma.set(x.from,(suma.get(x.from)||0)-poc)}
+        }
+        obj.push({C,kod,nazev:dodPopis(dz),dat:den,ks:poc,castka,stav:"dodatečná faktura"});
+        continue;
+      }
+      if(!kod&&!sPC.has(String(C))&&jeDodatecna(nazevProdeje)){
+        obj.push({C,kod,nazev:nazevProdeje,dat:den,ks:poc,castka,stav:"DOPLŇ VÝMĚNY"});
+        dodChybi.push({C,nazev:nazevProdeje}); continue;
+      }
       if(!z&&!kod)z=komponentaZNazvuProdeje(nazevProdeje);
       if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"neomezené"})}
       else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:kod?"zboží":"podle názvu"})}
@@ -2975,9 +3014,12 @@ function kOdpisu(txt){
     const chlPrip=[], chlCpu=[];   // chladiče z příplatku na chlazení a chladiče v ceně výměny CPU
     /* Příplatků může být víc než čtyři — export jich nese tolik, kolik má objednávka. */
     for(let i=1;i<=20;i++){
-      const v=r["itemSurcharge"+i+":value"]; if(!v)continue;
+      let v=r["itemSurcharge"+i+":value"];
+      const jm=String(r["itemSurcharge"+i+":name"]||"").trim();
+      const zNazvu=!v&&!!jm; if(zNazvu)v=jm;      // ruční příplatek bez hodnoty
+      if(!v)continue;
       const p=najdiPriplatek(v);
-      if(!p){pot+=" ⚠ "+v;chyby.push(v);continue}
+      if(!p){pot+=" ⚠ "+v+(zNazvu?" (prázdná hodnota příplatku)":"");chyby.push(v);continue}
       const kat=(()=>{for(const[c,a]of Object.entries(D.komponenty))for(const k of a)if(k.id===p.to)return c;})();
       /* Slot Ostatní je přídavný — WiFi, Office nebo ventilátor se přidávají,
          nic nenahrazují. Jinak by třeba WiFi vyřadila z rozpisu Office. */
@@ -3010,7 +3052,7 @@ function kOdpisu(txt){
   }
   nahradWifiDesky(suma,obj,poDat,wifiKand);
   nahradRam(suma,obj,poDat);
-  return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)]};
+  return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)],dodChybi};
 }
 function nactiSoubor(f){
   if(!f)return;
@@ -3071,7 +3113,7 @@ function zobrazOdpis(){
     /* Červená patří jen skutečné chybě. Zelená se odečte, modrá je zboží,
        šedá se přeskočí, žlutá chce jen odkliknout. */
     o.stav==="ok"?"#F1FAF4"
-    :(o.stav==="zboží"||o.stav==="podle názvu")?"#F7FAFF"
+    :(o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="dodatečná faktura")?"#F7FAFF"
     :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené"||o.stav==="duplicitní řádek")?"#F3F4F6"
     :o.stav==="jednorázový, neodečítá se"?"#FFF8E1"
     :o.stav==="služba, neodečítá se"?"#FFF8E1"
@@ -3099,15 +3141,17 @@ function zobrazOdpis(){
       persist(); zobrazOdpis();           // přepočítáme, kódy už nebudou blokovat
     } else toast("Založ sestavu nebo komponentu s tím kódem a načti prodeje znovu");
     return}
+  if((R.dodChybi||[]).length){
+    zobrazDodatecne(R.dodChybi,"odpis");return}
   if((R.sluzby||[]).length&&!confirm("V objednávkách je "+R.sluzby.length+" položka bez kódu, "
       +"typicky služba nebo doúčtování:\n\n"+R.sluzby.join("\n")
       +"\n\nZe skladu se nic neodečte. Pokračovat?"))return;
   if(!R.suma.size){toast("Nic nového k odepsání");return}
-  const L=[...R.suma].map(([id,q])=>{const k=najdiKomp(id);return{k,q}}).filter(x=>x.k)
+  const L=[...R.suma].map(([id,q])=>{const k=najdiKomp(id);return{k,q}}).filter(x=>x.k&&x.q!==0)
     .sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
   /* Které objednávky se právě odepisují — ať je vidět, co tabulka představuje. */
   /* Položky, které se opravdu odečtou — s datem, kódem, názvem a cenou z objednávky. */
-  const polozky=R.obj.filter(o=>["ok","zboží","podle názvu","s výhradou"].includes(o.stav))
+  const polozky=R.obj.filter(o=>["ok","zboží","podle názvu","s výhradou","dodatečná faktura"].includes(o.stav))
     .sort((a,b)=>String(a.dat).localeCompare(String(b.dat))||String(a.C).localeCompare(String(b.C)));
   const odepisovane=[...new Map(polozky.map(o=>[o.C,o.dat])).entries()]
     .sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
@@ -3140,13 +3184,76 @@ function zobrazOdpis(){
     <div class="tbl"><table><thead><tr><th>Komponenta</th><th class="r">Skladem</th><th class="r">Odečíst</th><th class="r">Zůstane</th></tr></thead><tbody>
     ${L.map(x=>{const ks=Number(x.k.ks)||0,zb=ks-x.q;return `<tr${zb<0?' style="background:#FDECEA"':''}>
       <td>${esc(x.k.nazev)}</td><td class="r num">${ks}</td>
-      <td class="r num" style="color:var(--bad)">−${x.q}</td>
+      <td class="r num" style="color:${x.q<0?"var(--ok)":"var(--bad)"}">${x.q<0?"+"+(-x.q):"−"+x.q}</td>
       <td class="r num" style="font-weight:600${zb<0?";color:var(--bad)":""}">${zb}${zb<0?" ⚠":""}</td></tr>`}).join("")}
     </tbody></table></div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       <button class="btn btn-sm" id="odpZrus">Zrušit</button>
       <button class="btn btn-sm btn-primary" id="odpOk">Odepsat ze skladu</button></div>`;
   modalKomp=null; $("#modal").hidden=false;
+}
+/* Editor dodatečných faktur. Otevře se sám, když odpis nebo vyhodnocení narazí
+   na doúčtovaný upgrade bez vyplněných výměn, a dá se vyvolat i tlačítkem
+   v Prodejích. Odpověď se pamatuje natrvalo, takže se stejná faktura neptá dvakrát. */
+function dodOpt(sel,prazdne){
+  let h='<option value=""'+(sel?"":" selected")+'>'+prazdne+'</option>';
+  for(const[kat,a]of Object.entries(D.komponenty||{})){
+    h+='<optgroup label="'+esc(kat)+'">';
+    for(const k of [...a].sort((x,y)=>COLL.compare(x.nazev||"",y.nazev||"")))
+      h+='<option value="'+esc(k.id)+'"'+(k.id===sel?" selected":"")+'>'+esc(k.nazev)+'</option>';
+    h+='</optgroup>';
+  }
+  return h;
+}
+function zobrazDodatecne(list,kam){
+  const L=(list||[]).filter(x=>x&&(x.C||x.code));
+  if(!L.length){toast("Žádná dodatečná faktura k doplnění");return}
+  dodEdit={kam,p:L.map(x=>{
+    const C=String(x.C||x.code||""), nazev=String(x.nazev||"");
+    const z=dodZaznam(C,nazev);
+    const zm=(z?z.zmeny:[{from:"",to:""}]).map(y=>({from:y.from||"",to:y.to||""}));
+    return {C,nazev,zmeny:zm.length?zm:[{from:"",to:""}]};
+  })};
+  renderDodatecne();
+}
+function renderDodatecne(){
+  if(!dodEdit)return;
+  $("#mTitle").textContent="Dodatečné faktury — co se vyměnilo";
+  $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 12px">Tyhle objednávky doúčtovávají upgrade
+    k počítači z jiné faktury. Řekni, co se v tom počítači místo základního dílu osadilo — do nákupu
+    pak jde <strong>rozdíl</strong> cen, ne plná cena, a v odpisu se nový díl odečte a ten základní
+    se vrátí na sklad, protože ho už sebrala objednávka s počítačem. Díl, který se jen přidal
+    (druhý disk, Office), nech v levém poli prázdný.</p>
+  ${dodEdit.p.map((x,i)=>`<div class="card" style="padding:10px 12px;margin-bottom:10px">
+    <div style="font-size:12.5px;margin-bottom:8px"><strong>${esc(x.C)}</strong>
+      <span class="muted"> · ${esc(x.nazev)}</span></div>
+    ${x.zmeny.map((z,j)=>`<div class="row" style="gap:6px;margin-bottom:6px;align-items:center">
+      <span class="muted" style="font-size:12px">z</span>
+      <select data-dodf="${i}-${j}" style="font-size:12px;max-width:250px">${dodOpt(z.from,"— nic, díl se jen přidal —")}</select>
+      <span class="muted" style="font-size:12px">na</span>
+      <select data-dodt="${i}-${j}" style="font-size:12px;max-width:250px">${dodOpt(z.to,"— vyber komponentu —")}</select>
+      <button class="btn btn-sm" data-dodrm="${i}-${j}" title="odebrat řádek">×</button></div>`).join("")}
+    <button class="btn btn-sm" data-dodadd="${i}">+ další výměna</button></div>`).join("")}
+    <div class="row" style="gap:8px;margin-top:6px;justify-content:flex-end">
+      <button class="btn btn-sm" id="dodZrus">Zrušit</button>
+      <button class="btn btn-sm btn-primary" id="dodOk">Uložit a přepočítat</button></div>`;
+  modalKomp=null; $("#modal").hidden=false;
+}
+function ulozDodatecne(){
+  if(!dodEdit)return;
+  let n=0;
+  for(const x of dodEdit.p){
+    const zm=x.zmeny.filter(z=>z.to);
+    if(!zm.length)continue;
+    D.dodatecne[dodKlic(x.C,x.nazev)]={nazev:x.nazev,zmeny:zm.map(z=>({from:z.from||"",to:z.to}))};
+    n++;
+  }
+  if(!n){toast("Vyber aspoň jednu komponentu v pravém poli");return}
+  persist();
+  const kam=dodEdit.kam; dodEdit=null; $("#modal").hidden=true;
+  if(kam==="odpis"){zobrazOdpis();return}
+  if(kam==="marze"){renderVyhodnoceni();return}
+  renderAll(); toast("Uloženo");
 }
 function czDatum(x){ if(!x)return "—";
   const m=String(x).match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m)return String(x);
@@ -3172,7 +3279,7 @@ function provedOdpis(){
   const R=odpisCache; if(!R)return;
   for(const[id,q]of R.suma){const k=najdiKomp(id); if(k)k.ks=(Number(k.ks)||0)-q}
   let maxDat=D.odpisyDo||"", n=0;
-  for(const o of R.obj) if(o.stav==="ok"||o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="s výhradou"){
+  for(const o of R.obj) if(o.stav==="ok"||o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="s výhradou"||o.stav==="dodatečná faktura"){
     D.odpisy.push(o.C+"|"+o.kod); n++;
     if(o.dat&&o.dat>maxDat)maxDat=o.dat;
   }
@@ -4276,6 +4383,41 @@ function vypadaJakoPC(t){
 /* Služba nebo úkon, u kterého je nulový nákup správně — nezastavuje výpočet. */
 const PC_SLUZBA=/po[šs]tovn|doprav|dod[áa]n[íi]|baln|z[áa]bal|instalac|servis|pr[áa]ce|mont[áa][žz]|diagnostik|[čc]i[šs]t[ěe]n|sleva|p[řr][íi]platek|poukaz|z[áa]ruka|prodlou[žz]en/i;
 const sluzbaBezNakupu=t=>PC_SLUZBA.test(String(t||""));
+/* Služba, u které se nic nevyměňuje — zužený PC_SLUZBA bez „příplatek", „sleva"
+   a „práce", protože právě slovo příplatek nese doúčtovaný upgrade. */
+const DOD_SLUZBA=/po[šs]tovn|doprav|dod[áa]n[íi]|baln|z[áa]bal|instalac|servis|mont[áa][žz]|diagnostik|[čc]i[šs]t[ěe]n|poukaz|prodlou[žz]en/i;
+const DOD_SLOVA=/p[řr][íi]platek|dodate[čc]n|dou?[čc]tov|upgrade|nav[ýi][šs]en|v[ýy]m[ěe]n/i;
+function dodKlic(C,nazev){return String(C||"")+"|"+String(nazev||"").trim().replace(/\s+/g," ").slice(0,80)}
+function dodZaznam(C,nazev){const z=(D.dodatecne||{})[dodKlic(C,nazev)];
+  return (z&&Array.isArray(z.zmeny)&&z.zmeny.length)?z:null}
+/* Kolik komponent text vyjmenovává. Řádek se dvěma a víc je doúčtování, i když
+   v něm není klíčové slovo — jedna komponenta je běžný prodej příslušenství. */
+function kolikKomponent(nazev){
+  const casti=String(nazev||"").split(/\s*[+,]\s*/).filter(x=>x.trim().length>2);
+  if(casti.length<2)return komponentaZNazvuProdeje(nazev)?1:0;
+  let n=0; for(const c of casti)if(komponentaZNazvuProdeje(c))n++;
+  return n;
+}
+function jeDodatecna(nazev){
+  const t=String(nazev||""); if(!t.trim())return false;
+  if(DOD_SLUZBA.test(t))return false;
+  return DOD_SLOVA.test(t)||kolikKomponent(t)>1;
+}
+/* Nákup dodatečné faktury: rozdíl cen u výměny, plná cena u přidaného dílu. */
+function dodNakup(z,den,poc){
+  let s=0;
+  for(const x of (z.zmeny||[])){
+    if(x.to)s+=poc*cenaKDatu(x.to,den);
+    if(x.from)s-=poc*cenaKDatu(x.from,den);
+  }
+  return s;
+}
+function dodPopis(z){
+  return (z.zmeny||[]).map(x=>{
+    const nt=(najdiKomp(x.to)||{}).nazev||"?";
+    return x.from?(((najdiKomp(x.from)||{}).nazev||"?")+" → "+nt):("+ "+nt);
+  }).join(" · ");
+}
 /* Záložní marže na počítač bez nákupní ceny, bez DPH. */
 function marzeNahrady(){ const v=Number((D.nastaveni||{}).marzeNahrada); return v>0?v:3000 }
 function vyhodnotObdobi(txt,od,doData){
@@ -4297,7 +4439,7 @@ function vyhodnotObdobi(txt,od,doData){
     }
     obj.get(c).rad.push(r);
   }
-  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[], rozepsane=[];
+  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[], rozepsane=[], dodChybi=[];
   for(const o of obj.values()){
     if(od&&o.den<od)continue;
     /* Obsahuje objednávka počítač? Podle toho se pozná rozepsaná cena. */
@@ -4334,9 +4476,16 @@ function vyhodnotObdobi(txt,od,doData){
         const m=rozpadSestavy(s,kod,poc,skr);
         const chlPrip=[],chlCpu=[];
         for(let i=1;i<=20;i++){
-          const v=r["itemSurcharge"+i+":value"]; if(!v)continue;
+          /* Objednávka poskládaná ručně v administraci nese text v názvu parametru
+             a hodnotu má prázdnou. Dřív se takový příplatek tiše přeskočil a díly
+             se spočítaly v základní konfiguraci — marže pak byla vyšší o rozdíl
+             nákupu, který zákazník zaplatil. */
+          let v=r["itemSurcharge"+i+":value"];
+          const jm=String(r["itemSurcharge"+i+":name"]||"").trim();
+          const zNazvu=!v&&!!jm; if(zNazvu)v=jm;
+          if(!v)continue;
           const pp=najdiPriplatek(v);
-          if(!pp){chyby.push(v);continue}
+          if(!pp){chyby.push(zNazvu?("„"+v+"“ u objednávky "+(r.code||"")+" — příplatek má v exportu prázdnou hodnotu, oprav ho v Shoptetu"):v);continue}
           const kat=katKomp(pp.to);
           const stary=kat==="Ostatní"?null:(s.vyber||{})[kat];
           if(stary&&m.has(stary))m.set(stary,m.get(stary)-poc);
@@ -4357,6 +4506,16 @@ function vyhodnotObdobi(txt,od,doData){
         nk+=poc*((Number(D.nastaveni.prace)||0)+(Number(D.nastaveni.windows)||0));
         nakup+=nk;
       } else {
+        const nzRad=String(r.orderItemName||"");
+        /* Dodatečná faktura k počítači z jiné objednávky — do nákupu jde rozdíl
+           vyměněných dílů, ne plná cena první poznané komponenty. */
+        const dz=!kod?dodZaznam(o.code,nzRad):null;
+        if(dz){nakup+=dodNakup(dz,o.den,poc);continue}
+        /* Když v objednávce počítač je, je položka bez kódu rozepsaná část ceny
+           (řeší se níž). Když není, je to doúčtovaný upgrade a dokud nevím,
+           co se vyměnilo, výpočet se zastaví. */
+        if(!kod&&!maPC&&jeDodatecna(nzRad)){
+          dodChybi.push({C:o.code,nazev:nzRad,cena});continue}
         let kk=kod?kompPodleKoduEshop(kod):null;
         if(!kk&&!kod)kk=komponentaZNazvuProdeje(String(r.orderItemName||""));
         if(kk){
@@ -4404,7 +4563,7 @@ function vyhodnotObdobi(txt,od,doData){
     out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista,trzbaBezObj,vatO});
   }
   out.sort((a,b)=>String(a.den).localeCompare(String(b.den))||a.code.localeCompare(b.code));
-  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny,rozepsane};
+  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny,rozepsane,dodChybi};
 }
 function renderVyhodnoceni(){
   /* Stažený archiv má přednost; ruční vstup z panelu výš slouží jako záloha. */
@@ -4425,6 +4584,16 @@ function renderVyhodnoceni(){
   /* Prodané zboží, u kterého se nenašla nákupní cena a není to počítač ani
      služba. Nulový nákup by nadhodnotil marži o celou jeho cenu, takže se
      výpočet zastaví — stejně jako u nenapárovaných příplatků. */
+  /* Doúčtovaný upgrade bez vyplněných výměn. Plná cena dílu nebo nulový nákup
+     by marži rozhodily oběma směry, takže se čeká na doplnění. */
+  if((R.dodChybi||[]).length){
+    stav.textContent="";
+    vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
+      <strong>Dodatečná faktura — výpočet zastaven.</strong> Tyhle objednávky doúčtovávají upgrade
+      k počítači z jiné faktury. Dokud nevím, co se místo základního dílu osadilo, nespočítám nákup:
+      <br>${R.dodChybi.map(x=>esc(x.C+" · "+x.nazev+" · "+kc(x.cena))).join("<br>")}
+      <div class="row" style="margin-top:9px"><button class="btn btn-sm btn-primary" id="dodDoplnM">Doplnit výměny</button></div></div>`;
+    dodCekaM=R.dodChybi; return}
   if(R.nenaparovane.length){
     stav.textContent="";
     vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
@@ -5205,7 +5374,7 @@ function vsePotvrd(csvTaky,vseSoubory){
   }
   vseCache=null; $("#modal").hidden=true; renderAll(); toast(hlaska);
 }
-let skKat="",skQ="",kompQ="",sestQ="",specText="",lvlCache=null,zmenyCache=[],odpisCache=null,modelyId=null,nkNovy=null,rkNovy=null,pNovy=null,fCpu="",fGpu="",kompKat="";
+let dodEdit=null,dodCekaM=null,skKat="",skQ="",kompQ="",sestQ="",specText="",lvlCache=null,zmenyCache=[],odpisCache=null,modelyId=null,nkNovy=null,rkNovy=null,pNovy=null,fCpu="",fGpu="",kompKat="";
 const sestOtevrene={};   // které karty jsou rozbalené
 const jeKriticka=k=>k.krit!=null&&k.krit!==""&&(Number(k.ks)||0)<=Number(k.krit);
 const podLimitem=k=>jeKriticka(k)||(k.min!=null&&k.min!==""&&(Number(k.ks)||0)<=Number(k.min));
@@ -6369,6 +6538,12 @@ document.addEventListener("wheel",e=>{
 },{passive:true});
 document.addEventListener("change",e=>{
   const t=e.target;
+  /* Jen uložíme vybranou hodnotu — překreslení by sebralo fokus z dalšího pole. */
+  if(t.dataset.dodf!==undefined||t.dataset.dodt!==undefined){
+    const pole=t.dataset.dodf!==undefined?"from":"to";
+    const[i,j]=String(t.dataset.dodf??t.dataset.dodt).split("-").map(Number);
+    if(dodEdit&&dodEdit.p[i]&&dodEdit.p[i].zmeny[j])dodEdit.p[i].zmeny[j][pole]=t.value;
+    return}
   if(t.id==="hiRezim"){renderHistorie();return}
   if(t.dataset.sp&&t.dataset.pp){const s=D.sestavy.find(x=>x.id===t.dataset.sp);
     if(s){if(t.checked)delete s.vyp[t.dataset.pp];else s.vyp[t.dataset.pp]=true;renderSest();persist()}}
@@ -6480,6 +6655,13 @@ document.addEventListener("change",e=>{
     if(k){k[t.dataset.f]=t.value||null;renderSest();renderSur();persist();return}}
 });
 document.addEventListener("click",e=>{
+  const dAdd=e.target.closest("[data-dodadd]");
+  if(dAdd){const i=Number(dAdd.dataset.dodadd);
+    if(dodEdit&&dodEdit.p[i]){dodEdit.p[i].zmeny.push({from:"",to:""});renderDodatecne()}return}
+  const dRm=e.target.closest("[data-dodrm]");
+  if(dRm){const[i,j]=String(dRm.dataset.dodrm).split("-").map(Number);
+    if(dodEdit&&dodEdit.p[i]){dodEdit.p[i].zmeny.splice(j,1);
+      if(!dodEdit.p[i].zmeny.length)dodEdit.p[i].zmeny.push({from:"",to:""});renderDodatecne()}return}
   const u=e.target.closest(".use[data-kde]");
   if(u){modalKomp=u.dataset.kde;renderModal();$("#modal").hidden=false;return;}
   const sb=e.target.closest("[data-spec]");
@@ -6952,6 +7134,13 @@ document.addEventListener("click",e=>{
     }
     $("#modal").hidden=true;modelyId=null;renderKomp();renderSklad();persist();toast("Uloženo")}
   if(t.id==="pdCloud"){nactiProdejeZCloudu();return}
+  if(t.id==="dodOk"){ulozDodatecne();return}
+  if(t.id==="dodZrus"){dodEdit=null;$("#modal").hidden=true;return}
+  if(t.id==="dodDoplnM"){zobrazDodatecne(dodCekaM||[],"marze");return}
+  if(t.id==="pdDod"){
+    const L=Object.entries(D.dodatecne||{}).map(([k,v])=>({C:k.split("|")[0],nazev:v.nazev||""}));
+    if(!L.length){toast("Zatím žádná dodatečná faktura uložená");return}
+    zobrazDodatecne(L,"nic");return}
   if(t.id==="pdNacti"){zobrazOdpis()}
   if(e.target.closest("#pdDrop")&&e.target.id!=="pdFile"){$("#pdFile").click()}
   if(t.id==="odpZrus"){$("#modal").hidden=true}
