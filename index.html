@@ -408,6 +408,7 @@ tr.unused td{background:#FEFCFB}
   <div id="pdStav" class="card" style="padding:10px 12px;margin-bottom:10px;background:#F1FAF4;border-color:#BFE6CE"></div>
   <p class="hint">Vlož obsah CSV exportu objednávek ze Shoptetu (obě šablony, s <code>itemCode</code> i <code>orderItemCode</code>). Sestavy se rozpadnou na komponenty podle konfigurace, příplatků a zvolené barvy skříně. Odečte se až po tvém potvrzení.</p>
   <div class="row" id="pdSum" style="gap:24px;margin-bottom:10px"></div>
+  <div class="muted" id="pdStavySouboru" style="font-size:12px;margin-bottom:10px"></div>
   <div class="row" style="gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
     <button class="btn btn-sm btn-primary" id="pdCloud">↓ Načíst prodeje z cloudu</button>
     <button class="btn btn-sm" id="pdDod">Dodatečné faktury</button>
@@ -731,6 +732,8 @@ tr.unused td{background:#FEFCFB}
         <tr><td>Licence Windows</td><td class="r"><input type="number" id="cWin" step="10" class="px"></td><td class="muted">Kč</td></tr>
         <tr><td>Okno historických cen</td><td class="r"><input type="number" id="cOkno" step="10" min="7" class="px"></td><td class="muted">dní &mdash; z jak starých nákupů se bere cena k datu prodeje ve Prodejích</td></tr>
         <tr><td>Záložní marže na PC</td><td class="r"><input type="number" id="cNahr" step="100" min="0" class="px"></td><td class="muted">Kč bez DPH &mdash; použije se, když se u prodaného počítače nenajde nákupní cena</td></tr>
+        <tr><td>Stavy objednávek = storno</td><td class="r"><input type="text" id="cStorno" class="px" placeholder="storno, zrušen, vrácen"></td><td class="muted">čárkami oddělené kusy textu &mdash; objednávka s takovým stavem se nepočítá do marže a neodepisuje se; když už odepsaná byla, díly se vrátí na sklad</td></tr>
+        <tr><td>Stavy, které se počítají</td><td class="r"><input type="text" id="cPocitat" class="px" placeholder="prázdné = všechny kromě stornových"></td><td class="muted">když vyplníš, chová se objednávka v jiném stavu stejně jako storno &mdash; můžeš pak do exportu posílat úplně všechny stavy a nic ti tiše nezmizí</td></tr>
       </tbody></table></div>
     </div>
 
@@ -1424,7 +1427,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=257;
+const VERZE=262;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2722,12 +2725,20 @@ function csvRozdel(txt){
       pátého příplatku by se posunuly o jedno pole. */
    const delka=r=>{let L=r.length; while(L&&!r[L-1])L--; return L};
    while(hd.length&&!hd[hd.length-1])hd.pop();
-   if(/^itemSurcharge\d+:(price|includingVat|name|value)$/i.test(String(hd[hd.length-1]||""))){
+   /* Doplňuje se ZA poslední příplatkový sloupec, ne na konec hlavičky. Shoptet
+      za příplatkový blok přidává další sloupce (statusName) a ty musí zůstat
+      vzadu — jinak by se stav objednávky četl z pozice příplatku. */
+   let posl=-1;
+   for(let i=0;i<hd.length;i++)
+     if(/^itemSurcharge\d+:(price|includingVat|name|value)$/i.test(String(hd[i]||"")))posl=i;
+   if(posl>=0){
      const maxLen=rows.reduce((a,r)=>Math.max(a,delka(r)),0);
      let n=Math.max(0,...hd.filter(x=>/^itemSurcharge\d+:name$/i.test(x))
        .map(x=>Number(String(x).match(/\d+/)[0])));
-     while(hd.length+3<=maxLen){ n++; csvDoplneno++;
-       hd.push("itemSurcharge"+n+":name","itemSurcharge"+n+":value","itemSurcharge"+n+":price") }
+     const trojice=[];
+     for(let k=Math.floor((maxLen-hd.length)/3);k>0;k--){ n++; csvDoplneno++;
+       trojice.push("itemSurcharge"+n+":name","itemSurcharge"+n+":value","itemSurcharge"+n+":price") }
+     if(trojice.length)hd.splice(posl+1,0,...trojice);
    }}
   return rows.slice(1).map(v=>{const o={};hd.forEach((k,i)=>o[k]=v[i]??"");return o});
 }
@@ -2937,9 +2948,16 @@ function kOdpisu(txt){
   const dodChybi=[];
   /* Objednávky, ve kterých je počítač. Tam je položka bez kódu rozepsaná část
      ceny; jinde je to doúčtovaný upgrade k počítači z jiné faktury. */
-  const sPC=new Set();
+  const sPC=new Set(), sStorno=new Set(), stavyPocty=new Map(), videnObj=new Set();
   for(const r0 of radky){const k0=String(r0.orderItemCode??r0.itemCode??"").trim();
-    if(k0&&najdiSestavu(k0))sPC.add(String(r0.code||""))}
+    /* Přehled stavů v souboru — ať je vidět, co se bere jako storno a co ne. */
+    const c0=String(r0.code||""); if(c0&&!videnObj.has(c0)){videnObj.add(c0);
+      const s0=stavObjednavky(r0)||"(bez stavu)";
+      stavyPocty.set(s0,(stavyPocty.get(s0)||0)+1)}
+    if(k0&&najdiSestavu(k0))sPC.add(String(r0.code||""));
+    /* Odepisuje se i ve stavu „vyřizuje se", takže objednávka může být později
+       zrušená. Když export nese stav, zrušené se přeskočí. */
+    if(jeStornoObj(r0))sStorno.add(String(r0.code||""))}
   /* Objednávky, u kterých by šla osadit deska s integrovanou WiFi. Rozhodne se až
      po celém souboru — teprve tam je vidět, na kolik strojů desky vůbec vystačí. */
   const wifiKand=[];
@@ -2966,7 +2984,16 @@ function kOdpisu(txt){
     const castka=Math.round((String(r.currencyCode||"CZK")!=="CZK"?jedn/kurz:jedn)*poc);
     if(videno.has(C+"|"+kod)){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"duplicitní řádek"});continue}
     videno.add(C+"|"+kod);
-    if(D.odpisy.includes(C+"|"+kod)){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"již odepsáno"});continue}
+    /* Odepisuje se už ve stavu před expedicí, takže objednávka může skončit
+       stornem. Když je stornovaná a ještě se neodepsala, přeskočí se. Když se
+       odepsala, díly se stejným rozpadem vrátí na sklad a objednávka zmizí
+       z odepsaných, aby šla případně odepsat znovu. */
+    const bylOdepsan=D.odpisy.includes(C+"|"+kod);
+    const reverz=sStorno.has(String(C))&&bylOdepsan;
+    if(sStorno.has(String(C))&&!reverz){
+      obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"stornováno"});continue}
+    if(bylOdepsan&&!reverz){obj.push({C,kod,nazev:r.orderItemName||"",dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"již odepsáno"});continue}
+    const zn=reverz?-1:1;
     /* Objednávka starší než revize skladu je v jeho stavu už zahrnutá. Feed ji posílá
        podle času poslední změny, takže sem doputuje i dva roky stará reklamace. */
     const den=(r.date||"").slice(0,10);
@@ -2988,11 +3015,12 @@ function kOdpisu(txt){
       const dz=!kod?dodZaznam(C,nazevProdeje):null;
       if(dz){
         for(const x of (dz.zmeny||[])){
-          if(x.to){pr(suma,x.to,poc);zaz(x.to,poc,den)}
+          if(x.to){pr(suma,x.to,zn*poc); if(!reverz)zaz(x.to,poc,den)}
           if(x.from){const kf=najdiKomp(x.from);
-            if(kf&&!kf.neomezene)suma.set(x.from,(suma.get(x.from)||0)-poc)}
+            if(kf&&!kf.neomezene)suma.set(x.from,(suma.get(x.from)||0)-zn*poc)}
         }
-        obj.push({C,kod,nazev:dodPopis(dz),dat:den,ks:poc,castka,stav:"dodatečná faktura"});
+        obj.push({C,kod,nazev:(reverz?"STORNO — vrací se: ":"")+dodPopis(dz),dat:den,ks:poc,castka,
+          stav:reverz?"storno, vrací se":"dodatečná faktura"});
         continue;
       }
       const odk=!kod?odkazNaObjednavku(nazevProdeje,sPC):"";
@@ -3007,7 +3035,9 @@ function kOdpisu(txt){
       }
       if(!z&&!kod)z=komponentaZNazvuProdeje(nazevProdeje);
       if(z&&z.neomezene){obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:"neomezené"})}
-      else if(z){pr(suma,z.id,poc);zaz(z.id,poc,(r.date||"").slice(0,10));obj.push({C,kod,nazev:z.nazev,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:kod?"zboží":"podle názvu"})}
+      else if(z){pr(suma,z.id,zn*poc); if(!reverz)zaz(z.id,poc,(r.date||"").slice(0,10));
+        obj.push({C,kod,nazev:(reverz?"STORNO — vrací se: ":"")+z.nazev,dat:(r.date||"").slice(0,10),
+          ks:poc,castka,stav:reverz?"storno, vrací se":(kod?"zboží":"podle názvu")})}
       /* Položka bez kódu bývá jednorázová služba nebo doúčtování — ze skladu se
          nic odečítat nemá. Jen se vypíše a Lukáš ji odklikne. Nenapárovaný KÓD
          je jiná věc: tam se nejspíš nepodařilo poznat komponentu. */
@@ -3073,12 +3103,13 @@ function kOdpisu(txt){
       const n=Math.min(m.get(w.deska)||0,m.get(w.modul)||0);
       if(n>0)wifiKand.push({w,q:n,dat:(r.date||"").slice(0,10)});
     }
-    for(const[i,q]of m) if(q>0){pr(suma,i,q);zaz(i,q,(r.date||"").slice(0,10))}
-    obj.push({C,kod,nazev:s.nazev+pot+info,dat:(r.date||"").slice(0,10),ks:poc,castka,stav:pot?"s výhradou":"ok"});
+    for(const[i,q]of m) if(q>0){pr(suma,i,zn*q); if(!reverz)zaz(i,q,(r.date||"").slice(0,10))}
+    obj.push({C,kod,nazev:(reverz?"STORNO — vrací se: ":"")+s.nazev+pot+info,dat:(r.date||"").slice(0,10),
+      ks:poc,castka,stav:reverz?"storno, vrací se":(pot?"s výhradou":"ok")});
   }
   nahradWifiDesky(suma,obj,poDat,wifiKand);
   nahradRam(suma,obj,poDat);
-  return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)],dodChybi};
+  return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)],dodChybi,stavy:[...stavyPocty.entries()]};
 }
 function nactiSoubor(f){
   if(!f)return;
@@ -3140,7 +3171,8 @@ function zobrazOdpis(){
        šedá se přeskočí, žlutá chce jen odkliknout. */
     o.stav==="ok"?"#F1FAF4"
     :(o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="dodatečná faktura"||o.stav==="rozepsaná cena")?"#F7FAFF"
-    :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené"||o.stav==="duplicitní řádek")?"#F3F4F6"
+    :(o.stav==="již odepsáno"||o.stav==="před revizí"||o.stav==="neomezené"||o.stav==="duplicitní řádek"||o.stav==="stornováno")?"#F3F4F6"
+    :o.stav==="storno, vrací se"?"#EAF0FB"
     :o.stav==="jednorázový, neodečítá se"?"#FFF8E1"
     :o.stav==="služba, neodečítá se"?"#FFF8E1"
     :"#FDECEA"}">
@@ -3151,7 +3183,10 @@ function zobrazOdpis(){
     ||'<tr><td colspan="5" style="padding:22px;text-align:center;color:var(--ink-3)">Nic k odepsání.</td></tr>';
   const nove=R.obj.filter(o=>o.stav!=="již odepsáno"&&o.stav!=="NEZNÁMÝ KÓD"
     &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se"&&o.stav!=="duplicitní řádek"
-    &&o.stav!=="jednorázový, neodečítá se").length;
+    &&o.stav!=="stornováno"&&o.stav!=="jednorázový, neodečítá se").length;
+  const stavyTxt=(R.stavy||[]).sort((a,b)=>b[1]-a[1])
+    .map(([s,n])=>s+" "+n+(jeStornoStav(s)?" → storno":(jeProdejniStav(s)?"":" → nepočítá se"))).join(" · ");
+  const stavEl=$("#pdStavySouboru"); if(stavEl)stavEl.textContent=stavyTxt?("Stavy v souboru: "+stavyTxt):"";
   $("#pdSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Položek v souboru</div><div class="price" style="font-size:20px">${R.obj.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">K odepsání</div><div class="price" style="font-size:20px;color:var(--ok)">${nove}</div></div>
     <div><div class="muted" style="font-size:11.5px">Problémů</div><div class="price" style="font-size:20px;color:${R.chyby.length?"var(--bad)":"var(--ink-3)"}">${R.chyby.length}</div></div>`;
@@ -3177,14 +3212,21 @@ function zobrazOdpis(){
     .sort((a,b)=>COLL.compare(a.k.nazev,b.k.nazev));
   /* Které objednávky se právě odepisují — ať je vidět, co tabulka představuje. */
   /* Položky, které se opravdu odečtou — s datem, kódem, názvem a cenou z objednávky. */
-  const polozky=R.obj.filter(o=>["ok","zboží","podle názvu","s výhradou","dodatečná faktura","rozepsaná cena"].includes(o.stav))
+  const polozky=R.obj.filter(o=>["ok","zboží","podle názvu","s výhradou","dodatečná faktura","rozepsaná cena","storno, vrací se"].includes(o.stav))
     .sort((a,b)=>String(a.dat).localeCompare(String(b.dat))||String(a.C).localeCompare(String(b.C)));
   const odepisovane=[...new Map(polozky.map(o=>[o.C,o.dat])).entries()]
     .sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const dny=[...new Set(odepisovane.map(x=>x[1]).filter(Boolean))];
   const rozsah=dny.length?(dny.length===1?czDatum(dny[0]):czDatum(dny[0])+" – "+czDatum(dny[dny.length-1])):"";
+  const vraci=R.obj.filter(o=>o.stav==="storno, vrací se");
   $("#mTitle").textContent="Odepsat ze skladu";
   $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Zkontroluj a potvrď. Ceny se nemění, mění se jen množství.</p>
+    ${vraci.length?`<div style="background:#EAF0FB;border:1px solid #CBD9EF;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <strong>${vraci.length===1?"Jedna stornovaná objednávka se vrací na sklad":vraci.length+" stornovaných objednávek se vrací na sklad"}</strong>
+      — byly odepsané a export je teď hlásí jako zrušené, takže se díly připíšou zpátky
+      a objednávka zmizí ze seznamu odepsaných: ${esc([...new Set(vraci.map(o=>o.C))].join(", "))}.
+      Rozpad se bere z ceníku, takže pokud se při původním odpisu místo jedné dvaatřicítky
+      osadily dvě šestnáctky, zkontroluj paměti ručně.</div>`:""}
     ${csvDoplneno?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Hlavička souboru byla užší než data</strong> — chyběl${csvDoplneno>1?"y":""} ${csvDoplneno}
       příplatkov${csvDoplneno>1?"é sloupce":"ý sloupec"}. Dopočítal jsem ${csvDoplneno>1?"je":"ho"}, takže příplatky
@@ -3312,9 +3354,16 @@ function provedOdpis(){
   const R=odpisCache; if(!R)return;
   for(const[id,q]of R.suma){const k=najdiKomp(id); if(k)k.ks=(Number(k.ks)||0)-q}
   let maxDat=D.odpisyDo||"", n=0;
-  for(const o of R.obj) if(o.stav==="ok"||o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="s výhradou"||o.stav==="dodatečná faktura"||o.stav==="rozepsaná cena"){
-    D.odpisy.push(o.C+"|"+o.kod); n++;
-    if(o.dat&&o.dat>maxDat)maxDat=o.dat;
+  for(const o of R.obj){
+    if(o.stav==="storno, vrací se"){
+      /* Vrácená objednávka zmizí z odepsaných — kdyby se zase oživila,
+         odepíše se normálně znovu. */
+      D.odpisy=D.odpisy.filter(x=>x!==o.C+"|"+o.kod); n++; continue;
+    }
+    if(o.stav==="ok"||o.stav==="zboží"||o.stav==="podle názvu"||o.stav==="s výhradou"||o.stav==="dodatečná faktura"||o.stav==="rozepsaná cena"){
+      D.odpisy.push(o.C+"|"+o.kod); n++;
+      if(o.dat&&o.dat>maxDat)maxDat=o.dat;
+    }
   }
   if(maxDat)D.odpisyDo=maxDat;
   D.odpisyLog.push({kdy:new Date().toISOString().slice(0,10),polozek:n,do:maxDat||null});
@@ -4424,6 +4473,65 @@ const DOD_SLOVA=/p[řr][íi]platek|dodate[čc]n|dou?[čc]tov|upgrade|nav[ýi][š
    ve které ten počítač je, pozná se podle něj, že jde jen o rozepsanou část ceny:
    nic se neúčtuje do nákupu a nic se neodepisuje. Čísla, která v souboru žádnou
    objednávku s počítačem neoznačují, se ignorují — hádat se nic nebude. */
+/* Od chvíle, kdy se odepisuje už ve stavu „vyřizuje se", může tatáž objednávka
+   být v archivu dvakrát — jednou jako rozpracovaná, podruhé jako vyřízená.
+   Odpis si dvojí započtení hlídá sám (pamatuje si objednávku i kód), vyhodnocení
+   období ale ne: sečetlo by tržbu i nákup dvakrát. Podpis řádku schválně nenese
+   cenu, takže z dvojice snímků zůstane ten novější, i když se mezitím cena
+   upravila. */
+function radekPodpis(r){
+  return String(r.orderItemType||"")+"|"+String(r.orderItemCode??r.itemCode??"")+"|"
+    +String(r.orderItemName||"")+"|"+String(r.orderItemAmount??1);
+}
+/* Stav objednávky, když ho export nese. Shoptet ho pojmenovává různě, a když
+   sloupec chybí, chová se všechno jako dřív. */
+const STAV_SLOUPCE=["statusName","status","orderStatus","orderStatusName","statusText","stav"];
+function stavObjednavky(r){
+  for(const k of STAV_SLOUPCE){const v=r[k]; if(v!=null&&String(v).trim())return String(v).trim()}
+  return "";
+}
+/* Názvy stavů si e-shop určuje sám, takže pevný vzorec by dřív nebo později
+   netrefil. Seznam je v Nastavení, čárkami oddělené kusy textu; stačí, aby se
+   jeden z nich ve stavu vyskytl. Porovnává se bez diakritiky a bez ohledu na
+   velikost písmen. */
+const STORNO_VYCHOZI="storno, zrušen, vrácen, nevyzvednut, zamítnut";
+function seznamStavu(pole,vychozi){
+  return String(D.nastaveni&&D.nastaveni[pole]!=null?D.nastaveni[pole]:(vychozi||""))
+    .split(",").map(x=>norm3(x)).filter(Boolean);
+}
+/* Stornový seznam hledá kus textu kdekoli ve stavu — „nevyzvednut" tak sedne
+   i na „Storno - nevyzvednuto". */
+function stavObsahuje(stav,kusy){
+  const t=norm3(stav); if(!t)return false;
+  return kusy.some(k=>k.length>=3?t.includes(k):t===k);
+}
+/* Seznam prodejních stavů se naopak porovnává PŘESNĚ. Částečná shoda by tu
+   byla past: „Vyřízena" je obsažená v „Nevyřízená", takže by se nevyřízená
+   objednávka počítala jako prodej. Stavy se proto vypisují celé, tak jak
+   stojí v e-shopu. Co se netrefí, vypíše se v Prodejích jako „nepočítá se". */
+function stavJeJeden(stav,kusy){
+  const t=norm3(stav); if(!t)return false;
+  return kusy.some(k=>t===k);
+}
+function jeStornoStav(stav){
+  return stavObsahuje(stav,seznamStavu("stavyStorno",STORNO_VYCHOZI));
+}
+/* Seznam stavů, které znamenají prodej. Když je prázdný, počítá se všechno
+   kromě stornových — tak se to chovalo do v261 a tak to zůstane u souborů
+   bez sloupce se stavem. Když se vyplní, je objednávka mimo seznam na tom
+   stejně jako storno: nepočítá se, neodepisuje, a když odepsaná byla, díly
+   se vrátí. Tím nemůže žádná objednávka tiše zmizet z exportu a nechat po
+   sobě odepsané díly — stačí posílat všechny stavy. */
+function jeProdejniStav(stav){
+  const kusy=seznamStavu("stavyPocitat","");
+  if(!kusy.length)return true;
+  if(!String(stav||"").trim())return true;     // starší dávky stav nenesou
+  return stavJeJeden(stav,kusy);
+}
+function mimoProdej(stav){
+  return jeStornoStav(stav)||!jeProdejniStav(stav);
+}
+const jeStornoObj=r=>mimoProdej(stavObjednavky(r));
 function odkazNaObjednavku(txt,kody){
   for(const m of String(txt||"").matchAll(/\d{6,12}/g))if(kody.has(m[0]))return m[0];
   return "";
@@ -4464,6 +4572,7 @@ function dodPopis(z){
 function marzeNahrady(){ const v=Number((D.nastaveni||{}).marzeNahrada); return v>0?v:3000 }
 function vyhodnotObdobi(txt,od,doData){
   const radky=csvRozdel(txt);
+  const storno=new Set();     // objednávky, které export označil za stornované
   const vat=VAT();            // pozor: lokální VAT by zastínil funkci VAT()
   const obj=new Map();
   for(const r of radky){
@@ -4479,15 +4588,24 @@ function vyhodnotObdobi(txt,od,doData){
         valuta:String(r.currencyCode||"CZK"),kurz:Number(String(r.currencyExchangeRate||1).replace(",","."))||1,
         vatObj:(sD>0&&bD>0)?Math.max(1,Math.round(sD/bD*1000)/1000):0,rad:[]});
     }
+    if(jeStornoObj(r))storno.add(c);
     obj.get(c).rad.push(r);
+  }
+  /* Z dvojích snímků téže objednávky necháme ten poslední. */
+  let duplicit=0;
+  for(const o of obj.values()){
+    const m=new Map();
+    for(const r of o.rad){const k=radekPodpis(r); if(m.has(k))duplicit++; m.set(k,r)}
+    if(m.size!==o.rad.length)o.rad=[...m.values()];
   }
   /* Objednávky, ve kterých je počítač — na ty smí druhá faktura odkazovat. */
   const pcObj=new Set();
   for(const[c,o]of obj)
     if(o.rad.some(x=>{const k=String(x.orderItemCode??x.itemCode??"").trim();return k&&!!najdiSestavu(k)}))pcObj.add(String(c));
-  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[], rozepsane=[], dodChybi=[];
+  const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[], rozepsane=[], dodChybi=[], stornovane=[];
   for(const o of obj.values()){
     if(od&&o.den<od)continue;
+    if(storno.has(o.code)){stornovane.push(o.code);continue}
     /* Obsahuje objednávka počítač? Podle toho se pozná rozepsaná cena. */
     const maPC=o.rad.some(x=>{
       const k=String(x.orderItemCode??x.itemCode??"").trim();
@@ -4617,7 +4735,7 @@ function vyhodnotObdobi(txt,od,doData){
     out.push({...o,trzba,nakup,slevy,dopravaMoje,platNakl,pc,cista,trzbaBezObj,vatO});
   }
   out.sort((a,b)=>String(a.den).localeCompare(String(b.den))||a.code.localeCompare(b.code));
-  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny,rozepsane,dodChybi};
+  return {obj:out,chyby:[...new Set(chyby)],bezNakupu,nenaparovane,dopocteno,bezCeny,rozepsane,dodChybi,stornovane,duplicit};
 }
 function renderVyhodnoceni(){
   /* Stažený archiv má přednost; ruční vstup z panelu výš slouží jako záloha. */
@@ -4748,6 +4866,11 @@ function renderVyhodnoceni(){
     ${R.bezNakupu.length?`<div style="background:#FFF8E1;border:1px solid #E7D9A8;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Položky bez nákupní ceny</strong> — v marži jsou jako čistý zisk, takže je o jejich nákup nadhodnocená:
       <br>${R.bezNakupu.map(esc).join("<br>")}</div>`:""}
+    ${(R.stornovane||[]).length||R.duplicit?`<div style="background:#F3F4F6;border:1px solid #DDE3EA;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      ${(R.stornovane||[]).length?`<strong>Stornované objednávky vynechané z výpočtu:</strong> ${esc(R.stornovane.join(", "))}<br>`:""}
+      ${R.duplicit?`<strong>${R.duplicit} ${R.duplicit===1?"řádek byl":R.duplicit<5?"řádky byly":"řádků bylo"} v souboru dvakrát</strong>
+        — typicky tatáž objednávka stažená ve stavu „vyřizuje se" a pak znovu jako vyřízená. Počítám ji jednou, z novějšího snímku.`:""}
+    </div>`:""}
     ${R.rozepsane.length?`<div style="background:#EAF0FB;border:1px solid #CBD9EF;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Rozepsaná cena počítače</strong> — řádek bez kódu v objednávce, kde je i sestava. Díly se počítají
       jednou u té sestavy, takže je to jen druhá část téže ceny, ne služba navíc:
@@ -6382,7 +6505,10 @@ function renderNast(){
      <td class="r"><button class="icon-x" data-delwifi="${i}">×</button></td></tr>`).join("");}
   $("#cVat").value=D.nastaveni.vat; $("#cWork").value=D.nastaveni.prace;
   $("#cWin").value=D.nastaveni.windows; $("#cOkno").value=(Number(D.nastaveni.oknoCen)||90);
-  $("#cNahr").value=(Number(D.nastaveni.marzeNahrada)||3000); renderParovani(); 
+  $("#cNahr").value=(Number(D.nastaveni.marzeNahrada)||3000);
+  $("#cStorno").value=(D.nastaveni.stavyStorno!=null?D.nastaveni.stavyStorno:STORNO_VYCHOZI);
+  $("#cPocitat").value=(D.nastaveni.stavyPocitat||"");
+  renderParovani(); 
 }
 /* Křížek svítí jen u pole, ve kterém něco je. */
 function osvezKrizky(){
@@ -6557,9 +6683,10 @@ document.addEventListener("input",e=>{
   if(t.dataset.skp!==undefined){D.skrine.hodnoty[t.dataset.skp]=t.value===""?null:Number(t.value);renderSest();persist()}
   if(t.id==="skExtra"){D.skrine.extra.castka=Number(t.value);renderSest();persist()}
   if(t.id==="skDesky"){D.skrine.extra.desky=t.value;renderSest();persist()}
-  if(["cVat","cWork","cWin","cOkno","cNahr"].includes(t.id)){
+  if(["cVat","cWork","cWin","cOkno","cNahr","cStorno","cPocitat"].includes(t.id)){
     D.nastaveni={...D.nastaveni,vat:+$("#cVat").value,prace:+$("#cWork").value,windows:+$("#cWin").value,
-      oknoCen:Math.max(7,+$("#cOkno").value||90),marzeNahrada:Math.max(0,+$("#cNahr").value||3000)};
+      oknoCen:Math.max(7,+$("#cOkno").value||90),marzeNahrada:Math.max(0,+$("#cNahr").value||3000),
+      stavyStorno:$("#cStorno").value,stavyPocitat:$("#cPocitat").value};
     /* změna okna přepočítá jen Prodeje, ceny sestav na něm nezávisí */
     renderSest();renderSur();persist();
     if(typeof vyCache!=="undefined")vyCache=null;}
