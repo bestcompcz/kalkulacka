@@ -89,6 +89,12 @@ tbody tr:last-child td{border-bottom:0}
 td.r{text-align:right}
 .px{width:100%}
 .block table{table-layout:fixed}
+/* Historie období: sloupec s datumem měl zbylou šířku a peníze se mačkaly do
+   96 px, takže se „Kč" zalamovalo pod číslo. Šířky jsou v procentech, aby
+   sedly na každou šířku karty, a čísla se nezalamují. */
+#hiTab td,#hiTab th{white-space:nowrap}
+#hiTab td:first-child{white-space:normal}
+#hiTab td:first-child>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .modely-btn{flex:1;display:flex;align-items:center;gap:6px;text-align:left;font:inherit;font-size:11.5px;
   color:var(--ink-2);background:#FBFDFF;border:1px solid #E6EEF6;border-radius:7px;padding:4px 8px;cursor:pointer;
   min-height:26px;overflow:hidden}
@@ -432,6 +438,8 @@ tr.unused td{background:#FEFCFB}
       <input type="date" id="vyDo" style="max-width:150px;font-size:12.5px">
       <button class="btn btn-sm" id="vyMinuly" title="Pondělí až nedělě minulého týdne" style="line-height:1.25">Minulý týden</button>
       <button class="btn btn-sm" id="vyPredminuly" title="Pondělí až neděle předminulého týdne" style="line-height:1.25">Předminulý týden</button>
+      <input type="month" id="vyMesic" style="max-width:128px;font-size:12.5px" title="Vyber měsíc a klikni na Celý měsíc">
+      <button class="btn btn-sm" id="vyCelyMesic" title="Nastaví od prvního do posledního dne vybraného měsíce" style="line-height:1.25">Celý měsíc</button>
       <button class="btn btn-sm btn-primary" id="vyArchiv" title="Stáhne objednávky za zvolené období z repozitáře a spočítá">↓ Z archivu a spočítat</button>
       <button class="btn btn-sm" id="vySpocti" title="Spočítá z CSV, které je načtené v panelu výš">Spočítat</button>
       <button class="btn btn-sm" id="vyUloz" title="Zapíše období do historie, ať jde kreslit vývoj">Uložit do historie</button>
@@ -1416,7 +1424,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=254;
+const VERZE=256;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4760,7 +4768,20 @@ function ulozTyden(){
    Pokrytí se hlídá zvlášť. Chybějící týden by součet za rok tiše snížil
    a nikdo by si toho nevšiml, proto se mezery vypisují. */
 const HI_SOUCTY=["obj","pc","obrat","trzba","nakup","marze","reklama","marzePoReklame","slevy","doprava","platby"];
-function hiKlic(od,rezim){
+/* Uložené období je týden pondělí–neděle, takže na přelomu měsíce leží ve dvou.
+   Zařadí se podle měsíce, ve kterém je většina jeho dnů — tedy podle středu
+   období. Dřív rozhodoval první den, a tak týden 31. 8.–6. 9. padl celý do
+   srpna: srpen pak hlásil 23 počítačů z jednoho jediného dne a září o ně
+   přišlo. Období se nikdy nedělí, jen se celé zařadí tam, kam patří většinou. */
+function hiStred(x){
+  const d=s=>Math.round(Date.parse(String(s)+"T00:00:00Z")/864e5);
+  const a=d(x&&x.od), b=d(x&&x.do);
+  if(!isFinite(a))return String((x&&x.od)||"");
+  if(!isFinite(b)||b<a)return String(x.od);
+  return new Date(Math.floor((a+b)/2)*864e5).toISOString().slice(0,10);
+}
+function hiKlic(x,rezim){
+  const od=typeof x==="string"?x:hiStred(x);
   const m=String(od||"").match(/^(\d{4})-(\d{2})/); if(!m)return String(od||"?");
   if(rezim==="rok")return m[1];
   if(rezim==="kvartal")return m[1]+"|Q"+(Math.floor((+m[2]-1)/3)+1);
@@ -4778,7 +4799,7 @@ function hiSkupiny(T,rezim){
     od:x.od,do:x.do,index:i,verze:x.verze,...x}));
   const m=new Map();
   for(const x of T){
-    const k=hiKlic(x.od,rezim);
+    const k=hiKlic(x,rezim);
     let g=m.get(k);
     if(!g){g={popis:hiPopis(k,rezim),pocet:0,od:x.od,do:x.do};for(const f of HI_SOUCTY)g[f]=0;m.set(k,g)}
     g.pocet++;
@@ -4891,13 +4912,14 @@ function renderHistorie(){
         <div class="price" style="font-size:20px">${sum.pc?kc(sum.po/sum.pc):"—"}</div></div>
     </div>
     ${grafHistorie(G)}
-    <div class="tbl" style="margin-top:10px"><table><thead><tr>
-      <th>${rezim==="obdobi"?"Období":"Součet"}</th><th class="r" style="width:46px">Obj.</th>
-      <th class="r" style="width:40px">PC</th><th class="r" style="width:96px">Obrat</th>
-      <th class="r" style="width:96px">Tržba bez DPH</th><th class="r" style="width:96px">Nákup</th>
-      <th class="r" style="width:92px">Čistá marže</th><th class="r" style="width:84px">Reklama</th>
-      <th class="r" style="width:92px">Po reklamě</th><th class="r" style="width:76px">Na PC</th>
-      ${rezim==="obdobi"?`<th style="width:28px"></th>`:""}</tr></thead><tbody>
+    <div class="tbl" style="margin-top:10px"><table id="hiTab"><thead><tr>
+      <th style="width:${rezim==="obdobi"?17:19}%">${rezim==="obdobi"?"Období":"Součet"}</th>
+      <th class="r" style="width:4%">Obj.</th>
+      <th class="r" style="width:4%">PC</th><th class="r" style="width:11%">Obrat</th>
+      <th class="r" style="width:11%">Tržba bez DPH</th><th class="r" style="width:11%">Nákup</th>
+      <th class="r" style="width:10.5%">Čistá marže</th><th class="r" style="width:9.5%">Reklama</th>
+      <th class="r" style="width:10.5%">Po reklamě</th><th class="r" style="width:8.5%">Na PC</th>
+      ${rezim==="obdobi"?`<th style="width:3%"></th>`:""}</tr></thead><tbody>
       ${G.map(x=>`<tr><td>${esc(x.popis)}
         <div class="muted" style="font-size:10.5px">${rezim==="obdobi"
           ? (x.verze?"spočteno ve v"+esc(String(x.verze)):"starší záznam")
@@ -4913,7 +4935,10 @@ function renderHistorie(){
         <td class="r num"><strong>${kc(sum.po)}</strong><div class="muted" style="font-size:10.5px">${pct(sum.po,sum.trzba)}</div></td>
         <td class="r num"><strong>${sum.pc?kc(sum.po/sum.pc):"—"}</strong></td>
         ${rezim==="obdobi"?"<td></td>":""}</tr>
-    </tbody></table></div>`;
+    </tbody></table></div>
+    ${rezim!=="obdobi"?`<p class="hint" style="margin:8px 0 0">Sečtou se celé uložené týdny — období se zařadí tam, kde leží většina jeho dnů,
+      nikdy se nedělí. Na přelomu měsíce proto rozsah u řádku nesedí přesně na kalendářní měsíc. Přesný kalendářní měsíc
+      spočítáš výš ve <strong>Vyhodnocení období</strong> tlačítkem <strong>Celý měsíc</strong>.</p>`:""}`;
 }
 function hiCsv(){
   const T=(D.tydny||[]).slice().sort((a,b)=>String(a.od).localeCompare(String(b.od)));
@@ -6799,6 +6824,21 @@ document.addEventListener("click",e=>{
       toast("Sestava smazána")}}
   if(t.id==="vyMinuly"||t.id==="vyPredminuly"){
     vyCsv=null;vyMinulyTyden(t.id==="vyPredminuly"?2:1);renderVyhodnoceni();return}
+  /* Celý kalendářní měsíc — jediný způsob, jak dostat přesné září, protože
+     uložené týdny přes přelom měsíce nikdy nesednou na kalendář. */
+  if(t.id==="vyCelyMesic"){
+    const el=$("#vyMesic");
+    let v=(el&&el.value)||"";
+    if(!/^\d{4}-\d{2}$/.test(v)){                       // nevybráno = minulý měsíc
+      const d=new Date(); const r=d.getMonth()?d.getFullYear():d.getFullYear()-1;
+      const c=d.getMonth()?d.getMonth():12;
+      v=r+"-"+String(c).padStart(2,"0");
+      if(el)el.value=v;
+    }
+    const m=v.split("-"), posl=new Date(Date.UTC(+m[0],+m[1],0)).getUTCDate();
+    $("#vyOd").value=m[0]+"-"+m[1]+"-01";
+    $("#vyDo").value=m[0]+"-"+m[1]+"-"+String(posl).padStart(2,"0");
+    vyCsv=null; renderVyhodnoceni(); return}
   if(t.id==="vyArchiv"){vyhodnotZArchivu();return}
   if(t.id==="hiCsv"){hiCsv();return}
   if(t.dataset.delpar!==undefined){
