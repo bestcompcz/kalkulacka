@@ -1427,7 +1427,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=262;
+const VERZE=263;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2952,7 +2952,10 @@ function kOdpisu(txt){
   for(const r0 of radky){const k0=String(r0.orderItemCode??r0.itemCode??"").trim();
     /* Přehled stavů v souboru — ať je vidět, co se bere jako storno a co ne. */
     const c0=String(r0.code||""); if(c0&&!videnObj.has(c0)){videnObj.add(c0);
-      const s0=stavObjednavky(r0)||"(bez stavu)";
+      /* Prázdný stav se ukládá jako prázdný řetězec, ne jako popisek — jinak
+         by se „(bez stavu)" porovnávalo se seznamy jako skutečný název stavu
+         a starší dávky by se tvářily, že se nepočítají. */
+      const s0=stavObjednavky(r0);
       stavyPocty.set(s0,(stavyPocty.get(s0)||0)+1)}
     if(k0&&najdiSestavu(k0))sPC.add(String(r0.code||""));
     /* Odepisuje se i ve stavu „vyřizuje se", takže objednávka může být později
@@ -3185,7 +3188,8 @@ function zobrazOdpis(){
     &&o.stav!=="před revizí"&&o.stav!=="služba, neodečítá se"&&o.stav!=="duplicitní řádek"
     &&o.stav!=="stornováno"&&o.stav!=="jednorázový, neodečítá se").length;
   const stavyTxt=(R.stavy||[]).sort((a,b)=>b[1]-a[1])
-    .map(([s,n])=>s+" "+n+(jeStornoStav(s)?" → storno":(jeProdejniStav(s)?"":" → nepočítá se"))).join(" · ");
+    .map(([s,n])=>(s||"bez stavu")+" "+n
+      +(jeStornoStav(s)?" → storno":(jeProdejniStav(s)?"":" → nepočítá se"))).join(" · ");
   const stavEl=$("#pdStavySouboru"); if(stavEl)stavEl.textContent=stavyTxt?("Stavy v souboru: "+stavyTxt):"";
   $("#pdSum").innerHTML=`<div><div class="muted" style="font-size:11.5px">Položek v souboru</div><div class="price" style="font-size:20px">${R.obj.length}</div></div>
     <div><div class="muted" style="font-size:11.5px">K odepsání</div><div class="price" style="font-size:20px;color:var(--ok)">${nove}</div></div>
@@ -4605,13 +4609,15 @@ function vyhodnotObdobi(txt,od,doData){
   const out=[], chyby=[], bezNakupu=[], nenaparovane=[], dopocteno=[], bezCeny=[], rozepsane=[], dodChybi=[], stornovane=[];
   for(const o of obj.values()){
     if(od&&o.den<od)continue;
+    if(doData&&o.den>doData)continue;
+    /* Storno se vypisuje až tady, za oběma datumy — jinak by se do seznamu
+       vynechaných dostaly i objednávky mimo zvolené období. */
     if(storno.has(o.code)){stornovane.push(o.code);continue}
     /* Obsahuje objednávka počítač? Podle toho se pozná rozepsaná cena. */
     const maPC=o.rad.some(x=>{
       const k=String(x.orderItemCode??x.itemCode??"").trim();
       return k&&!!najdiSestavu(k);
     });
-    if(doData&&o.den>doData)continue;
     /* Pravidlo 7: v currencyExchangeRate je počet eur za korunu, takže se dělí. */
     const pre=v=>o.valuta!=="CZK"?v/o.kurz:v;
     let trzba=0,nakup=0,pc=0,slevy=0,doprPlatil=0,platPlatil=0,doprText="",platText="";
