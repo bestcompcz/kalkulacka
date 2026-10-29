@@ -1427,7 +1427,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=263;
+const VERZE=264;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3026,7 +3026,7 @@ function kOdpisu(txt){
           stav:reverz?"storno, vrací se":"dodatečná faktura"});
         continue;
       }
-      const odk=!kod?odkazNaObjednavku(nazevProdeje,sPC):"";
+      const odk=(!kod&&jenRozepsanaCena(nazevProdeje))?odkazNaObjednavku(nazevProdeje,sPC):"";
       if(odk&&odk!==String(C)){
         obj.push({C,kod,nazev:"rozepsaná cena objednávky "+odk+" — díly odečte ona",
           dat:den,ks:poc,castka,stav:"rozepsaná cena"});
@@ -4472,7 +4472,9 @@ const sluzbaBezNakupu=t=>PC_SLUZBA.test(String(t||""));
 /* Služba, u které se nic nevyměňuje — zužený PC_SLUZBA bez „příplatek", „sleva"
    a „práce", protože právě slovo příplatek nese doúčtovaný upgrade. */
 const DOD_SLUZBA=/po[šs]tovn|doprav|dod[áa]n[íi]|baln|z[áa]bal|instalac|servis|mont[áa][žz]|diagnostik|[čc]i[šs]t[ěe]n|poukaz|prodlou[žz]en/i;
-const DOD_SLOVA=/p[řr][íi]platek|dodate[čc]n|dou?[čc]tov|upgrade|nav[ýi][šs]en|v[ýy]m[ěe]n/i;
+/* „p" v příplatku je volitelné — v objednávce 20261346 bylo napsané „přílatek"
+   a na tom překlepu stálo, jestli se WIFI modul odečte ze skladu. */
+const DOD_SLOVA=/p[řr][íi]p?latek|dodate[čc]n|dou?[čc]tov|upgrade|nav[ýi][šs]en|v[ýy]m[ěe]n/i;
 /* Druhá faktura k témuž počítači. Když do názvu položky napíšeš číslo objednávky,
    ve které ten počítač je, pozná se podle něj, že jde jen o rozepsanou část ceny:
    nic se neúčtuje do nákupu a nic se neodepisuje. Čísla, která v souboru žádnou
@@ -4536,6 +4538,14 @@ function mimoProdej(stav){
   return jeStornoStav(stav)||!jeProdejniStav(stav);
 }
 const jeStornoObj=r=>mimoProdej(stavObjednavky(r));
+/* Odkaz na objednávku znamená rozepsanou cenu jen tehdy, když text nepojmenovává
+   žádný díl. „přílatek wifi 6 + bluetooth k objednávce 20261344" je doúčtovaný
+   modul, který ze skladu opravdu odejde — kdyby rozhodl odkaz, spočítal by se
+   nulový nákup a modul by ve skladu zůstal. */
+function jenRozepsanaCena(txt){
+  if(jeDodatecna(txt))return false;
+  return !komponentaZNazvuProdeje(txt);
+}
 function odkazNaObjednavku(txt,kody){
   for(const m of String(txt||"").matchAll(/\d{6,12}/g))if(kody.has(m[0]))return m[0];
   return "";
@@ -4682,7 +4692,7 @@ function vyhodnotObdobi(txt,od,doData){
         const dz=!kod?dodZaznam(o.code,nzRad):null;
         if(dz){nakup+=dodNakup(dz,o.den,poc);continue}
         /* Odkaz na objednávku s počítačem = rozepsaná cena, díly jsou v ní. */
-        const odk=!kod?odkazNaObjednavku(nzRad,pcObj):"";
+        const odk=(!kod&&jenRozepsanaCena(nzRad))?odkazNaObjednavku(nzRad,pcObj):"";
         if(odk&&odk!==o.code){
           rozepsane.push(o.code+" · "+nzRad.slice(0,44)+" · "+kc(cena)+" → patří k objednávce "+odk);continue}
         /* Když v objednávce počítač je, je položka bez kódu rozepsaná část ceny
@@ -4772,6 +4782,8 @@ function renderVyhodnoceni(){
       <br>${R.dodChybi.map(x=>esc(x.C+" · "+x.nazev+" · "+kc(x.cena))).join("<br>")}
       <div class="row" style="margin-top:9px"><button class="btn btn-sm btn-primary" id="dodDoplnM">Doplnit výměny</button></div></div>`;
     dodCekaM=R.dodChybi; return}
+  dodCekaR=(R.rozepsane||[]).map(s=>{const m=String(s).match(/^(\d+)\s·\s(.+?)\s·\s/);
+    return m?{C:m[1],nazev:m[2].trim()}:null}).filter(Boolean);
   if(R.nenaparovane.length){
     stav.textContent="";
     vyst.innerHTML=`<div style="background:#FDECEA;border:1px solid #F0C4BE;border-radius:8px;padding:10px 12px;font-size:12.5px">
@@ -4880,7 +4892,8 @@ function renderVyhodnoceni(){
     ${R.rozepsane.length?`<div style="background:#EAF0FB;border:1px solid #CBD9EF;border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
       <strong>Rozepsaná cena počítače</strong> — řádek bez kódu v objednávce, kde je i sestava. Díly se počítají
       jednou u té sestavy, takže je to jen druhá část téže ceny, ne služba navíc:
-      <br>${R.rozepsane.map(esc).join("<br>")}</div>`:""}
+      <br>${R.rozepsane.map(esc).join("<br>")}
+      <div class="row" style="margin-top:9px"><button class="btn btn-sm" id="dodDoplnR">Není to rozepsaná cena, doplním díly</button></div></div>`:""}
     <div class="row" style="gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div style="flex:1 1 280px;min-width:260px">
         <div style="font-size:12.5px;font-weight:700;margin-bottom:4px">Po dnech</div>
@@ -5574,7 +5587,7 @@ function vsePotvrd(csvTaky,vseSoubory){
   }
   vseCache=null; $("#modal").hidden=true; renderAll(); toast(hlaska);
 }
-let dodEdit=null,dodCekaM=null,skKat="",skQ="",kompQ="",sestQ="",specText="",lvlCache=null,zmenyCache=[],odpisCache=null,modelyId=null,nkNovy=null,rkNovy=null,pNovy=null,fCpu="",fGpu="",kompKat="";
+let dodEdit=null,dodCekaM=null,dodCekaR=null,skKat="",skQ="",kompQ="",sestQ="",specText="",lvlCache=null,zmenyCache=[],odpisCache=null,modelyId=null,nkNovy=null,rkNovy=null,pNovy=null,fCpu="",fGpu="",kompKat="";
 const sestOtevrene={};   // které karty jsou rozbalené
 const jeKriticka=k=>k.krit!=null&&k.krit!==""&&(Number(k.ks)||0)<=Number(k.krit);
 const podLimitem=k=>jeKriticka(k)||(k.min!=null&&k.min!==""&&(Number(k.ks)||0)<=Number(k.min));
@@ -7363,6 +7376,7 @@ document.addEventListener("click",e=>{
   if(t.id==="dodOk"){ulozDodatecne();return}
   if(t.id==="dodZrus"){dodEdit=null;$("#modal").hidden=true;return}
   if(t.id==="dodDoplnM"){zobrazDodatecne(dodCekaM||[],"marze");return}
+  if(t.id==="dodDoplnR"){zobrazDodatecne(dodCekaR||[],"marze");return}
   if(t.id==="pdDod"){
     const L=Object.entries(D.dodatecne||{}).map(([k,v])=>({C:k.split("|")[0],nazev:v.nazev||""}));
     if(!L.length){toast("Zatím žádná dodatečná faktura uložená");return}
