@@ -1427,7 +1427,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=264;
+const VERZE=265;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4853,7 +4853,8 @@ function renderVyhodnoceni(){
       <tr><td><strong>Tržba bez DPH</strong></td><td class="r num"><strong>${kc(trzbaBez)}</strong></td></tr>
       <tr><td>Nákup bez DPH</td><td class="r num">-${kc(nak/VAT())}</td></tr>
       <tr><td>Doprava, kterou jsi platil ty</td><td class="r num">-${kc(dopr/VAT())}</td></tr>
-      <tr><td>Poplatky za platbu</td><td class="r num">-${kc(plat/VAT())}</td></tr>
+      <tr><td>Poplatky za platbu${plat<0?" <span class=\"muted\" style=\"font-weight:400\">· provize ESSOX převážila</span>":""}</td>
+        <td class="r num">${plat<0?kc(-plat/VAT()):"-"+kc(plat/VAT())}</td></tr>
       <tr><td><strong>Čistá marže</strong></td><td class="r num"><strong>${kc(cista)}</strong></td></tr>
       ${rek?`<tr><td>Reklama (bez DPH)</td><td class="r num">-${kc(rekCena)}</td></tr>
       <tr><td><strong>Marže po reklamě</strong></td><td class="r num"><strong style="color:${poRek<0?"var(--bad)":"var(--ok)"}">${kc(poRek)}</strong></td></tr>`:""}
