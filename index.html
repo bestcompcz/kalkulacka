@@ -693,10 +693,11 @@ tr.unused td{background:#FEFCFB}
     </div>
     <div class="card block" style="grid-column:1/-1">
       <header><span class="rail" style="--k:var(--case)"></span><h3>Skříně a varianty</h3></header>
-      <p class="hint" style="padding:8px 12px 0;margin:0">Hodnota je pozice skříně na společné škále. Příplatek v sestavě = rozdíl hodnot proti skříni, kterou má sestava vybranou.</p>
-      <div class="tbl"><table><thead><tr><th>Skříň</th><th>Hodnota na škále</th><th>V žebříčku</th><th>+RGB modul</th></tr></thead>
+      <p class="hint" style="padding:8px 12px 0;margin:0">Příplatek = rozdíl nákupních cen proti skříni, kterou má sestava vybranou, plus marže, nahoru na stovky. Barvy jednoho modelu stojí stejně, bere se dražší z nich. Hodnota na škále určuje už jen pořadí a to, jestli sestava s danou skříní varianty nabízí — do ceny nevstupuje.</p>
+      <div class="tbl"><table><thead><tr><th>Skříň</th><th>Nákup</th><th>Pozice na škále</th><th>Marže</th><th>Pevný příplatek</th><th>V žebříčku</th><th>+RGB modul</th></tr></thead>
       <tbody id="skrBody"></tbody></table></div>
       <div class="addrow row" style="gap:14px">
+        <label class="row" style="gap:6px">Marže za změnu skříně <input type="number" id="skMarze" class="px" style="width:80px" step="50"> Kč bez DPH</label>
         <label class="row" style="gap:6px">Příplatek navíc <input type="number" id="skExtra" class="px" style="width:80px"> Kč u desek
           <input type="text" id="skDesky" style="width:150px" placeholder="A520, B550"></label>
         <label class="row" style="gap:6px">RGB modul <select id="skModul" style="width:190px"></select></label>
@@ -919,12 +920,20 @@ function initMapa(d){
   return d;}
 function initSkrine(d){
   if(!d.skrine||d.skrine.v!==2)d.skrine={v:2,hodnoty:{},zebricek:{},extra:{castka:0,desky:"",modul:null,skrine:{}}};
+  /* v266: marže k příplatku za skříň. Globální hodnota platí pro každou skříň,
+     u které není vyplněná vlastní. Fractal dostává 1000 — je to prémiová skříň
+     a přestavba do ní je jiná práce než výměna Montechu za Montech. */
+  if(d.skrine.marze===undefined)d.skrine.marze=600;
+  if(!d.skrine.marzeKus)d.skrine.marzeKus={};
+  if(!d.skrine.pevny)d.skrine.pevny={};
   const S=d.komponenty["Skříň"]||[];
   const def={};   // hodnoty skříní jsou obchodní údaj, drží se jen v datech
   for(const k of S){
     if(d.skrine.hodnoty[k.id]===undefined)d.skrine.hodnoty[k.id]=def[k.nazev]!==undefined?def[k.nazev]:null;
     if(d.skrine.zebricek[k.id]===undefined)d.skrine.zebricek[k.id]=def[k.nazev]!==undefined;
     if(d.skrine.extra.skrine[k.id]===undefined)d.skrine.extra.skrine[k.id]=/XR/i.test(k.nazev);
+    if(d.skrine.marzeKus[k.id]===undefined)d.skrine.marzeKus[k.id]=/Fractal/i.test(k.nazev)?1000:null;
+    if(d.skrine.pevny[k.id]===undefined)d.skrine.pevny[k.id]=null;
   }
   return d;}
 function oprav(d){
@@ -1116,6 +1125,27 @@ function priplatkySestavy(s){
     return c&&s.vyber[c]===p.from;                 // základ sedí s komponentou sestavy
   });
 }
+/* Od v266 se příplatek za skříň počítá z nákupních cen v Komponentách, ne
+   z rozdílu hodnot na škále. Důvod: hodnoty na škále byly druhá sada cen, která
+   se musela udržovat ručně, a rozcházely se s Komponentami. Navíc byl příplatek
+   jen rozdílem cen bez marže — krok z XR na Fractal vycházel dokonce na −165 Kč.
+   Hodnota na škále teď určuje už jen pořadí a to, jestli sestava s danou skříní
+   varianty vůbec nabízí. */
+const modelSkrine=n=>String(n||"").replace(/\s+(Black|White)$/i,"");
+/* Barvy jednoho modelu stojí stejně. Bílá bývá o pár stovek dražší, ale účtovat
+   ji jinak by byl v ceníku nepořádek — bere se proto dražší z barev. */
+function cenaModeluSkrine(nazev){
+  const m=modelSkrine(nazev); let max=null;
+  for(const k of (D.komponenty["Skříň"]||[])){
+    if(modelSkrine(k.nazev)!==m)continue;
+    const c=cena(k); if(max===null||c>max)max=c;
+  }
+  return max;
+}
+function marzeSkrine(k){
+  const v=(D.skrine.marzeKus||{})[k.id];
+  return (v===null||v===undefined||v==="")?(Number(D.skrine.marze)||0):Number(v);
+}
 function varianty(s){
   const Sk=D.komponenty["Skříň"]||[], zaklad=spocti(s), out=[];
   const baseId=s.vyber["Skříň"]; if(!baseId)return out;
@@ -1127,6 +1157,7 @@ function varianty(s){
   const h0=Number(h0raw); if(!isFinite(h0))return out;
   const modul=D.skrine.extra.modul?najdiKomp(D.skrine.extra.modul):null;
   const e0=D.skrine.extra.skrine[baseId]&&maDeskuProModul(s)?(Number(D.skrine.extra.castka)||0):0;
+  const mBase=modelSkrine(base.nazev), cBase=cenaModeluSkrine(base.nazev);
   /* Základní skříň sestavy patří do výpisu vždy, i když v žebříčku není —
      jinak by se její varianta počítala podle jiné skříně se stejnou hodnotou. */
   for(const k of Sk){
@@ -1137,7 +1168,18 @@ function varianty(s){
     if(hv<h0)continue;
     const extraOk=!!(D.skrine.extra.skrine[k.id]&&maDeskuProModul(s));
     const extra=extraOk?(Number(D.skrine.extra.castka)||0):0;
-    const pr=hv-h0+extra-e0;
+    /* Stejný model jiné barvy a skříň, která není dražší, jdou bez příplatku —
+       za levnější skříň se nikdy nepřiplácí. */
+    let zakl=0;
+    if(modelSkrine(k.nazev)!==mBase&&cBase!==null){
+      const cK=cenaModeluSkrine(k.nazev);
+      if(cK!==null&&cK>cBase)zakl=Math.ceil((cK-cBase+marzeSkrine(k)*1.21)/100)*100;
+    }
+    /* Pevný příplatek přebije výpočet, stejně jako u příplatkových řádků.
+       Modul se připočítává i k němu, protože závisí na desce, ne na skříni. */
+    const pevRaw=(D.skrine.pevny||{})[k.id];
+    if(pevRaw!==null&&pevRaw!==undefined&&pevRaw!=="")zakl=Number(pevRaw);
+    const pr=zakl+extra-e0;
     const cenaProdej=zaklad.prodej+pr;
     const nak=zaklad.nakup-cena(base)+cena(k)+((extraOk&&modul)?cena(modul):0)
               -((e0&&modul)?cena(modul):0);
@@ -1427,7 +1469,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=265;
+const VERZE=266;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -6490,10 +6532,14 @@ function renderNast(){
   const S=D.komponenty["Skříň"]||[];
   $("#skrBody").innerHTML=S.map(k=>`<tr>
     <td>${esc(k.nazev)}</td>
-    <td class="r"><input type="number" class="px" style="width:96px" step="100" value="${D.skrine.hodnoty[k.id]??""}" data-skp="${k.id}"></td>
+    <td class="r" style="color:var(--muted)">${Math.round(cena(k))}</td>
+    <td class="r"><input type="number" class="px" style="width:80px" step="100" value="${D.skrine.hodnoty[k.id]??""}" data-skp="${k.id}"></td>
+    <td class="r"><input type="number" class="px" style="width:80px" step="50" placeholder="${Number(D.skrine.marze)||0}" value="${(D.skrine.marzeKus||{})[k.id]??""}" data-skm="${k.id}"></td>
+    <td class="r"><input type="number" class="px" style="width:80px" step="100" value="${(D.skrine.pevny||{})[k.id]??""}" data-skf="${k.id}"></td>
     <td class="r"><input type="checkbox" ${D.skrine.zebricek[k.id]?"checked":""} data-skz="${k.id}" style="width:auto"></td>
     <td class="r"><input type="checkbox" ${D.skrine.extra.skrine[k.id]?"checked":""} data-ske="${k.id}" style="width:auto"></td>
   </tr>`).join("");
+  $("#skMarze").value=D.skrine.marze;
   $("#skExtra").value=D.skrine.extra.castka;
   $("#skDesky").value=D.skrine.extra.desky;
   $("#skModul").innerHTML='<option value="">— žádný —</option>'+
@@ -6701,6 +6747,9 @@ document.addEventListener("input",e=>{
     }
     return}
   if(t.dataset.skp!==undefined){D.skrine.hodnoty[t.dataset.skp]=t.value===""?null:Number(t.value);renderSest();persist()}
+  if(t.dataset.skm!==undefined){(D.skrine.marzeKus=D.skrine.marzeKus||{})[t.dataset.skm]=t.value===""?null:Number(t.value);renderSest();persist()}
+  if(t.dataset.skf!==undefined){(D.skrine.pevny=D.skrine.pevny||{})[t.dataset.skf]=t.value===""?null:Number(t.value);renderSest();persist()}
+  if(t.id==="skMarze"){D.skrine.marze=Number(t.value)||0;renderNast();renderSest();persist()}
   if(t.id==="skExtra"){D.skrine.extra.castka=Number(t.value);renderSest();persist()}
   if(t.id==="skDesky"){D.skrine.extra.desky=t.value;renderSest();persist()}
   if(["cVat","cWork","cWin","cOkno","cNahr","cStorno","cPocitat"].includes(t.id)){
