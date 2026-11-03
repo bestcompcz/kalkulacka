@@ -1469,7 +1469,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=266;
+const VERZE=267;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4307,16 +4307,41 @@ function mesiceObdobi(od,doD){
   }
   return out;
 }
-/* Hlavička zůstane ta nejširší ze stažených měsíců; kratší řádky dorovná csvRozdel. */
+/* Každý měsíc má vlastní hlavičku. Shoptet posílá jen tolik příplatkových
+   skupin, kolik dávka potřebuje (10/2026: 7, 11/2026: 4), takže v užším měsíci
+   leží statusName o několik pozic dřív. Do v266 se řádky lepily pod hlavičku
+   nejširšího měsíce podle pozice a stav z 11/2026 se četl jako příplatek.
+   Proto se každý soubor rozloží SVOU hlavičkou (csvRozdel, včetně dopočtu
+   z v261) na záznamy podle názvů sloupců a teprve záznamy se slijí pod
+   sjednocenou hlavičku: základní sloupce, příplatky seřazené podle čísla,
+   pak sloupce za příplatkovým blokem (statusName). Nic se nepáruje podle pozice. */
+const JE_PRIPLATEK=/^itemSurcharge(\d+):(.+)$/i;
 function slijCsv(casti){
-  let hl=null; const radky=[];
+  const zaznamy=[], pred=[], po=[], cisla=new Set(), pod=[];
+  const znam=new Set();
   for(const t of casti){
-    const L=String(t||"").replace(/^﻿/,"").split(/\r?\n/).filter(x=>x.trim());
-    if(!L.length)continue;
-    if(hl==null||L[0].split(";").length>hl.split(";").length)hl=L[0];
-    radky.push(...L.slice(1));
+    const Z=csvRozdel(t);
+    if(!Z.length)continue;
+    let zaPriplatky=false;
+    for(const k of Object.keys(Z[0])){
+      const m=k.match(JE_PRIPLATEK);
+      if(m){ zaPriplatky=true; cisla.add(Number(m[1]));
+        const s=m[2].toLowerCase(); if(!pod.includes(s))pod.push(s); continue }
+      if(znam.has(k))continue;
+      znam.add(k); (zaPriplatky?po:pred).push(k);
+    }
+    zaznamy.push(...Z);
   }
-  return hl?[hl,...radky].join("\n"):"";
+  if(!zaznamy.length)return "";
+  /* Názvy podsloupců bereme tak, jak je Shoptet píše (name, value, price). */
+  const jmeno=s=>({name:"name",value:"value",price:"price",includingvat:"includingVat"})[s]||s;
+  const prip=[...cisla].sort((a,b)=>a-b).flatMap(n=>pod.map(s=>"itemSurcharge"+n+":"+jmeno(s)));
+  const hl=[...pred,...prip,...po];
+  /* Klíč příplatku v záznamu může mít jinou velikost písmen než sjednocená hlavička. */
+  const hodnota=(o,k)=>{ if(k in o)return o[k];
+    const kl=k.toLowerCase(); for(const x in o)if(x.toLowerCase()===kl)return o[x]; return "" };
+  const pole=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  return [hl.map(pole).join(";"),...zaznamy.map(o=>hl.map(k=>pole(hodnota(o,k))).join(";"))].join("\n");
 }
 let vyCsv=null;                        // objednávky stažené z archivu
 async function vyhodnotZArchivu(){
@@ -4341,7 +4366,7 @@ async function vyhodnotZArchivu(){
       +"Pusť robota objednávek v Actions s přepínačem „Postavit měsíční soubory znovu z celého archivu“.";
     return}
   vyCsv=slijCsv(casti);
-  const poc=vyCsv.split("\n").length-1;
+  const poc=csvRozdel(vyCsv).length;     // víceřádková poznámka v uvozovkách nesmí zvednout počet
   renderVyhodnoceni();
   st.textContent=(chybi.length?"chybí "+chybi.join(", ")+" · ":"")+poc+" položek z archivu";
 }
