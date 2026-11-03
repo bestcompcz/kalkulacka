@@ -1469,7 +1469,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=267;
+const VERZE=268;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4914,6 +4914,18 @@ function renderVyhodnoceni(){
         <div class="price" style="font-size:22px;color:${poRek<0?"var(--bad)":"var(--ok)"}">${kc(poRek)}</div>
         <div class="muted" style="font-size:11.5px">${pctPoRek.toFixed(1)} % · reklama ${kc(rekCena)}</div></div>`:""}
     </div>
+    ${(()=>{const MK=mkRadek({od,do:doD,obj:L.length,pc,obrat,kanaly:vyCache.kanaly},mkMarzePc());
+      return `<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px">
+      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <strong>Řádek pro marketing</strong>
+        <label style="display:flex;gap:6px;align-items:center">hrubá marže na 1 PC
+          <input type="number" id="mkMarzePc" value="${mkMarzePc()}" step="100" min="0" style="width:90px"></label>
+        ${MK.radek?`<button class="btn btn-sm btn-primary" id="mkKopiruj">Kopírovat řádek</button>`:""}
+      </div>
+      ${MK.radek?`<textarea id="mkRadek" readonly rows="1" wrap="off" style="width:100%;font-family:var(--mono);font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:none;overflow-x:auto">${esc(MK.radek)}</textarea>
+        <div class="muted" style="font-size:11px;margin-top:4px">datum · Facebook · Google · TikTok · Sklik · Bing · ChatGPT · ads celkem · obrat · hrubý zisk · objednávek · PC · čistý zisk · na 1 PC · náklad na prodej 1 PC · zisk z obratu · hrubá marže na 1 PC</div>`
+       :`<div class="muted">Řádek nejde sestavit — ${esc(MK.chyba)}.</div>`}
+      </div>`})()}
     <div class="tbl" style="margin-bottom:12px"><table><tbody>
       <tr><td>Obrat s DPH</td><td class="r num">${kc(obrat)}</td></tr>
       <tr><td>Slevy</td><td class="r num">-${kc(sl)}</td></tr>
@@ -4983,6 +4995,56 @@ function renderVyhodnoceni(){
     </div>`;
 }
 let vyCache=null;
+/* ======== řádek pro marketing ========
+   Jeden řádek na týden do tabulky pro markeťáky, oddělený tabulátory, aby šel
+   vložit rovnou do Google Sheets. Pořadí sloupců je dané jejich tabulkou:
+   datum · Facebook · Google · TikTok · Sklik · Bing · ChatGPT Ads · ads celkem ·
+   obrat · hrubý zisk · objednávek · PC · čistý zisk · čistý zisk na 1 PC ·
+   náklad na prodej 1 PC · zisk z obratu · hrubá marže na 1 PC.
+   Hrubý zisk tady NENÍ čistá marže z kalkulačky — je to ručně zadaná marže
+   na 1 PC × počet PC, tak to markeťáci dostávají. */
+const MK_KANALY=[
+  ["Facebook",/^(fb|facebook|instagram|ig|meta)\b/i],
+  ["Google",/^google\b/i],
+  ["TikTok",/^tiktok\b/i],
+  ["Sklik",/^(seznam|sklik)\b/i],
+  ["Bing",/^(bing|microsoft)\b/i],
+  ["ChatGPT",/^(chatgpt|openai)\b/i]];
+const mkMarzePc=()=>{ const v=Number((D.nastaveni||{}).mkMarzePc); return v>0?v:3900 };
+/* z = {od, do, obj, pc, obrat, kanaly:[{nazev,cena}], reklama?}. Kanál, který
+   nejde zařadit do žádného sloupce, řádek zastaví — jinak by chyběl v součtu
+   i ve sloupcích a čistý zisk by vyšel vyšší. */
+function mkRadek(z,marzePc){
+  const kan=z.kanaly||[];
+  if(!kan.length)return {chyba:"chybí náklady na reklamu — vlož výpis kanálů"};
+  const sl=MK_KANALY.map(()=>0), nezn=[];
+  for(const k of kan){
+    const i=MK_KANALY.findIndex(([,re])=>re.test(String(k.nazev||"").trim()));
+    if(i<0)nezn.push(k.nazev); else sl[i]+=Number(k.cena)||0;
+  }
+  if(nezn.length)return {chyba:"kanál, který nemá sloupec: "+nezn.join(", ")};
+  /* Součet z nezaokrouhlených částek, stejně jako v tabulce markeťáků. */
+  const ads=Math.round(z.reklama!=null&&z.reklama!==""?Number(z.reklama):sl.reduce((a,x)=>a+x,0));
+  const pc=Number(z.pc)||0, obrat=Number(z.obrat)||0, m=Number(marzePc)||0;
+  const hruby=Math.round(m*pc), cisty=hruby-ads;
+  const d2=x=>x.toFixed(2).replace(".",",");
+  const dm=s=>{const[r,mm,dd]=String(s||"").split("-");return Number(dd)+"."+Number(mm)+"."};
+  const pole=[dm(z.od)+"-"+dm(z.do),...sl.map(x=>String(Math.round(x))),String(ads),
+    d2(obrat),String(hruby),String(Number(z.obj)||0),String(pc),d2(cisty),
+    pc?d2(cisty/pc):"",pc?d2(ads/pc):"",obrat?d2(100*cisty/obrat)+"%":"",d2(m)];
+  return {radek:pole.join("\t"),pole};
+}
+function mkKopiruj(txt,hotovo){
+  const ok=()=>toast(hotovo||"Zkopírováno");
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(ok,()=>toast("Nepodařilo se zkopírovat"));
+  else{
+    const ta=document.createElement("textarea"); ta.value=txt;
+    document.body.appendChild(ta); ta.select();
+    try{document.execCommand("copy");ok()}catch(e){toast("Nepodařilo se zkopírovat")}
+    ta.remove();
+  }
+}
 /* Uloží spočítané období do historie, ať je z čeho kreslit vývoj. Stejné datumy
    přepíšou starý záznam, aby se po opravě dat nehromadily duplikáty. */
 function ulozTyden(){
@@ -4995,7 +5057,7 @@ function ulozTyden(){
        Metoda historických cen se v v225 měnila, takže je to podstatná informace. */
     slevy:Math.round(vyCache.sl||0),doprava:Math.round((vyCache.dopr||0)/VAT()),
     platby:Math.round((vyCache.plat||0)/VAT()),
-    verze:VERZE,kdy:new Date().toISOString(),
+    verze:VERZE,kdy:new Date().toISOString(),mkMarzePc:mkMarzePc(),
     kanaly:vyCache.kanaly.map(x=>({nazev:x.nazev,cena:Math.round(x.cena),konverze:x.konverze}))};
   if(!z.od||!z.do){toast("Vyplň od i do, jinak nevím, co ukládám");return}
   D.tydny=(D.tydny||[]).filter(x=>!(x.od===z.od&&x.do===z.do));
@@ -5163,13 +5225,13 @@ function renderHistorie(){
       <th class="r" style="width:11%">Tržba bez DPH</th><th class="r" style="width:11%">Nákup</th>
       <th class="r" style="width:10.5%">Čistá marže</th><th class="r" style="width:9.5%">Reklama</th>
       <th class="r" style="width:10.5%">Po reklamě</th><th class="r" style="width:8.5%">Na PC</th>
-      ${rezim==="obdobi"?`<th style="width:3%"></th>`:""}</tr></thead><tbody>
+      ${rezim==="obdobi"?`<th style="width:5%"></th>`:""}</tr></thead><tbody>
       ${G.map(x=>`<tr><td>${esc(x.popis)}
         <div class="muted" style="font-size:10.5px">${rezim==="obdobi"
           ? (x.verze?"spočteno ve v"+esc(String(x.verze)):"starší záznam")
           : x.pocet+(x.pocet===1?" období":x.pocet<5?" období":" období")+" · "+esc(czDatum(x.od))+" – "+esc(czDatum(x.do))}</div></td>
         ${bunky(x)}
-        ${rezim==="obdobi"?`<td class="r"><button class="x" data-delhi="${esc(x.od)}|${esc(x.do)}" title="Smazat z historie">×</button></td>`:""}</tr>`).join("")}
+        ${rezim==="obdobi"?`<td class="r" style="white-space:nowrap"><button class="x" data-mkhi="${esc(x.od)}|${esc(x.do)}" title="Zkopírovat řádek pro marketing">⧉</button><button class="x" data-delhi="${esc(x.od)}|${esc(x.do)}" title="Smazat z historie">×</button></td>`:""}</tr>`).join("")}
       <tr style="border-top:2px solid var(--line-2)"><td><strong>Celkem</strong></td>
         <td class="r num"><strong>${sum.obj}</strong></td><td class="r num"><strong>${sum.pc}</strong></td>
         <td class="r num"><strong>${kc(sum.obrat)}</strong></td><td class="r num"><strong>${kc(sum.trzba)}</strong></td>
@@ -6841,6 +6903,10 @@ document.addEventListener("change",e=>{
     if(dodEdit&&dodEdit.p[i]&&dodEdit.p[i].zmeny[j])dodEdit.p[i].zmeny[j][pole]=t.value;
     return}
   if(t.id==="hiRezim"){renderHistorie();return}
+  if(t.id==="mkMarzePc"){
+    D.nastaveni=D.nastaveni||{}; const v=Number(t.value);
+    if(v>0){D.nastaveni.mkMarzePc=v; persist()}
+    renderVyhodnoceni(); return}
   if(t.dataset.sp&&t.dataset.pp){const s=D.sestavy.find(x=>x.id===t.dataset.sp);
     if(s){if(t.checked)delete s.vyp[t.dataset.pp];else s.vyp[t.dataset.pp]=true;renderSest();persist()}}
   if(t.dataset.slot){const s=D.sestavy.find(s=>s.id===t.dataset.sid);if(s){s.vyber[t.dataset.slot]=t.value;renderSest();renderKomp();persist()}}
@@ -7126,6 +7192,14 @@ document.addEventListener("click",e=>{
     return}
   if(t.id==="vySpocti"){renderVyhodnoceni();return}
   if(t.id==="vyUloz"){ulozTyden();return}
+  if(t.id==="mkKopiruj"){const a=$("#mkRadek"); if(a)mkKopiruj(a.value,"Řádek pro marketing zkopírován"); return}
+  if(t.dataset.mkhi!==undefined){
+    const[od,doD]=String(t.dataset.mkhi).split("|");
+    const z=(D.tydny||[]).find(x=>x.od===od&&x.do===doD); if(!z)return;
+    const MK=mkRadek(z,z.mkMarzePc||mkMarzePc());
+    if(!MK.radek){toast("Řádek nejde sestavit — "+MK.chyba);return}
+    mkKopiruj(MK.radek,"Řádek "+MK.pole[0]+" zkopírován"+(z.mkMarzePc?"":" (marže na PC "+mkMarzePc()+" Kč — u záznamu nebyla uložená)"));
+    return}
   if(t.id==="zmenyCen"){zobrazZmenyCen();return}
   if(t.id==="czZrus"){cenyCache=null;$("#modal").hidden=true;return}
   if(t.id==="czOk"){
