@@ -1469,7 +1469,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=268;
+const VERZE=269;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -6358,7 +6358,13 @@ function pripomenPripravene(R){
    s bezvadným. Karta pak zastupuje celou skupinu a úpravy platí pro všechny kusy. */
 /* Záznam, do kterého se ještě nic nevyplnilo. Patří nahoru a nikdy se neslučuje —
    dvě rozpracované karty vedle sebe by jinak vypadaly jako dva kusy jednoho stroje. */
-const prNovy=pc=>pc.typ==="vlastni"?!String(pc.nazev||"").trim():!pc.sest;
+/* Právě přidaný stroj zůstává samostatný, dokud ho Lukáš nepotvrdí tlačítkem
+   Hotovo nebo kartu nesbalí. Bez toho se po výběru sestavy hned sloučil se
+   stejnými kusy se skříní ze sestavy — skříň už u něj nešla vybrat a úprava
+   v kartě by se rozeslala celé skupině (bílá by přepsala všechny černé).
+   Drží se jen v paměti stránky; po načtení se stroje sloučí normálně. */
+const prRozpr=new Set();
+const prNovy=pc=>prRozpr.has(pc.id)||(pc.typ==="vlastni"?!String(pc.nazev||"").trim():!pc.sest);
 function prKlic(pc){
   if(prNovy(pc))return "novy:"+pc.id;
   return JSON.stringify([pc.typ||"",pc.sest||"",pc.skrin||"",
@@ -6490,6 +6496,8 @@ function renderPripravene(){
           title="Když vyplníš, použije se místo vypočtené ceny">
         <input type="date" value="${esc(pc.datum||"")}" data-pri="${pc.id}" data-prf="datum"
           style="max-width:140px;font-size:12.5px" title="Kdy byl postavený">
+        ${prRozpr.has(pc.id)?`<button class="btn btn-sm btn-primary" data-prhotovo="${pc.id}"
+          title="Potvrdit stroj — stejné kusy se pak sloučí do jedné karty">Hotovo</button>`:""}
       </div>
       ${vlastni?`<div style="padding:0 14px 12px">
         <textarea data-pri="${pc.id}" data-prf="slozeni" rows="3" style="width:100%;font-size:12.5px"
@@ -7078,7 +7086,7 @@ document.addEventListener("click",e=>{
     const nc={id:uid(),sest:"",skrin:"",priplatky:[],pozn:"",cena:null,
       datum:new Date().toISOString().slice(0,10)};
     if(t.id==="prVlastni"){nc.typ="vlastni";nc.nazev="";nc.slozeni="";nc.nakup=null}
-    D.pripravene.push(nc); prOtevrene[nc.id]=true;
+    D.pripravene.push(nc); prOtevrene[nc.id]=true; prRozpr.add(nc.id);
     /* Zapnuté hledání by novou kartu schovalo — rozpracovaný stroj nemá co hledat. */
     prQ=""; {const pole=$("#prHledat"); if(pole)pole.value=""; osvezKrizky()}
     renderPripravene(); persist();
@@ -7106,8 +7114,12 @@ document.addEventListener("click",e=>{
     }
     return}
   if(t.dataset.kbal){kompOtevrene[t.dataset.kbal]=!kompOtevrene[t.dataset.kbal];renderKomp();return}
+  if(t.dataset.prhotovo){
+    prRozpr.delete(t.dataset.prhotovo); prOtevrene[t.dataset.prhotovo]=false;
+    renderPripravene(); return}
   if(t.dataset.prbal&&!(e.target.closest&&e.target.closest("[data-stop]"))){
     prOtevrene[t.dataset.prbal]=!prOtevrene[t.dataset.prbal];
+    if(!prOtevrene[t.dataset.prbal])prRozpr.delete(t.dataset.prbal);   // sbalením je hotový
     renderPripravene(); return}
   if(t.dataset.prdel){
     const pc=(D.pripravene||[]).find(x=>x.id===t.dataset.prdel);
