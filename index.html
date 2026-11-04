@@ -968,14 +968,17 @@ const SETY_SEED=[
   ["S613","613/GAM",["716","593"],"SET R5 5500 + RTX 3050 + AOC 24\" 260Hz + Trust klávesnice a myš"],
   ["S619","619/X3",["716","596"],"SET R5 5500 + RTX 5050 + AOC 24\" 260Hz + Yenkee set"],
   ["S482","482/X3BL",["727","596"],"SET R5 9600X + RX 9060 XT 16GB + MSI 27\" QHD 240Hz + Yenkee set"],
-  ["S365","365/XR",["170","596"],"SET R7 9800X3D + RX 9070 XT + Samsung 32\" G65B + Yenkee set"]];
+  ["S365","365/XR",["170","596"],"SET R7 9800X3D + RX 9070 XT + Samsung 32\" G65B + Yenkee set"],
+  ["S366","524/X3",["515","596"],"SET R5 9600X + RX 9070 XT + Samsung 27\" G65B + Yenkee set"]];
+const SETY_SEED_VER=2;   // 1 = prvních pět setů, 2 = S366 (4. 11. 2026 večer)
 /* Produkty setů založené na e-shopu 4. 11. 2026 (zatím skryté). */
 const SETY_URL={
   S488:"https://www.bestcomp.cz/herni-set-pc-rx-470-ryzen-5-4500-monitor-msi-mp243x-klavesnice-mys/",
   S613:"https://www.bestcomp.cz/herni-set-pc-rtx-3050-ryzen-5-5500-monitor-aoc-24g4zre-klavesnice-mys/",
   S619:"https://www.bestcomp.cz/herni-set-pc-rtx-5050-ryzen-5-5500-monitor-aoc-24g4zre-klavesnice-mys-sluchatka/",
   S482:"https://www.bestcomp.cz/herni-set-pc-rx-9060-xt-ryzen-5-9600x-monitor-msi-mag-275cqdf-x24-klavesnice-mys-sluchatka/",
-  S365:"https://www.bestcomp.cz/herni-set-pc-rx-9070-xt-ryzen-7-9800x3d-monitor-samsung-odyssey-g65b-klavesnice-mys-sluchatka/"};
+  S365:"https://www.bestcomp.cz/herni-set-pc-rx-9070-xt-ryzen-7-9800x3d-monitor-samsung-odyssey-g65b-klavesnice-mys-sluchatka/",
+  S366:"https://www.bestcomp.cz/herni-set-pc-rx-9070-xt-ryzen-5-9600x-monitor-samsung-odyssey-g65b-27-klavesnice-mys-sluchatka/"};
 /* SUF je deklarovaný až níž v kódu a při načtení dat ještě neexistuje. */
 const SETY_SKRIN={X3:"Montech X3 Black",X3BL:"Montech X3 Black",X4:"Montech X3 White",X3WH:"Montech X3 White",
   XR:"Montech XR Black",XR2:"Montech XR White",NOR:"Fractal North Black",NOR2:"Fractal North White",GAM:"Gamemax"};
@@ -993,7 +996,9 @@ function initSety(d){
       cil.sort((x,y)=>String(x.nazev).localeCompare(String(y.nazev),"cs",{numeric:true}));
       d.migMonitory=1;
     }
-    if(!d.setySeed&&Array.isArray(d.sestavy)&&d.komponenty){
+    /* setySeed = verze seznamu SETY_SEED, která už proběhla. Smyčka existující
+       kódy přeskakuje, takže přidání setu do seznamu = zvýšit SETY_SEED_VER. */
+    if((Number(d.setySeed)||0)<SETY_SEED_VER&&Array.isArray(d.sestavy)&&d.komponenty){
       const kompKod=kod=>{for(const a of Object.values(d.komponenty))for(const k of a||[])if(String(k.kodEshop||"").trim()===kod)return k;return null};
       const maKod=(x,kod)=>String(x.kod||"").split(",").map(y=>y.trim()).includes(kod);
       for(const[kodS,zakl,dopl,nazev]of SETY_SEED){
@@ -1010,7 +1015,7 @@ function initSety(d){
          načte export produktů — pak je přepíše nactiCenyZEshopu. */
       const E={"266":2790,"716":4300,"719":5400,"170":9900,"593":990,"596":1690};
       for(const[kod,c]of Object.entries(E)){const k=kompKod(kod); if(k&&!(Number(k.cenaEshop)>0)){k.cenaEshop=c;k.cenaEshopKdy="2026-11-04"}}
-      d.setySeed=1;
+      d.setySeed=SETY_SEED_VER;
     }
     /* 4. 11. 2026 večer: monitory setů podle grafiky. RX 9060 XT 16GB je na webu
        grafika na QHD → S482 dostane MSI MAG 275CQDF X24 (27" QHD 240 Hz) místo
@@ -1031,6 +1036,9 @@ function initSety(d){
       d.setyFix1=1;
     }
     for(const s of d.sestavy||[])if(s&&s.set)zajistiSet(s);
+    if(!Array.isArray(d.priplatkyKody)&&d.priplatkyOdeslano&&Array.isArray(d.sestavy)){
+      d.priplatkyKody=d.sestavy.flatMap(s=>String(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean)).filter(k=>k!=="S366");
+    }
   }catch(e){ try{console.error("initSety",e)}catch(_){} }
   return d;}
 /* Set je sestava, která nemá vlastní komponenty PC: vyber a vyp se čtou živě
@@ -1704,7 +1712,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=274;
+const VERZE=275;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2340,7 +2348,9 @@ function zobrazExportVse(){
         <td class="r num" style="color:${x.stara!==null&&x.nova>x.stara?"var(--bad)":"var(--ok)"}">${x.stara===null||x.nova==null?"—":(x.nova-x.stara>0?"+":"")+Math.round(x.nova-x.stara)}</td>
         <td class="r num">${x.sestav}</td></tr>`).join("")}
       </tbody></table></div>`
+      :PR.nove.length?""
       :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Příplatky se od posledního odeslání nezměnily.</p>`}
+    ${PR.znamo&&PR.nove.length?`<p style="margin:6px 0 0;font-size:12.5px;font-weight:600">Nové produkty, které příplatky na e-shopu ještě nemají: ${esc(PR.nove.join(", "))} — pošle se celá sada.</p>`:""}
     ${H(3,"Kategorie — cenový level")}
     ${lvl.length?`<ul style="margin:0;padding-left:18px;font-size:12.5px">
       ${lvl.map(x=>{const L=(x.s.kategorie||[]).filter(jeLevel), st=L[0];
@@ -5889,7 +5899,20 @@ function zmenyPriplatku(){
     radky.push({p,stara,nova,sestav:poc[p.id],param:paramPriplatku(p)});
   }
   radky.sort((a,b)=>Math.abs((b.nova||0)-(b.stara||0))-Math.abs((a.nova||0)-(a.stara||0)));
-  return {znamo:!!sn,radky};
+  /* Nový produkt (třeba set) má stejné ceny příplatků jako ostatní, takže ho
+     porovnání cen nevidí. Pamatují se proto i kódy, kterým příplatky odešly (v275). */
+  const ok=Array.isArray(D.priplatkyKody)?new Set(D.priplatkyKody):null;
+  const nove=ok?kodyPriplatku().filter(k=>!ok.has(k)):[];
+  return {znamo:!!sn,radky,nove};
+}
+/* Kódy produktů, které v souboru s příplatky dostanou aspoň jednu hodnotu. */
+function kodyPriplatku(){
+  const out=[];
+  for(const s of D.sestavy){
+    if(!priplatkySestavy(s).some(p=>!(s.vyp||{})[p.id]))continue;
+    for(const k of (s.kod||"").split(",").map(x=>x.trim()).filter(Boolean))out.push(k);
+  }
+  return out;
 }
 /* Soubor s příplatky pro Shoptet — volá se z tlačítka i z okna přepočtu. */
 function exportPriplatku(tichy){
@@ -7589,9 +7612,9 @@ document.addEventListener("click",e=>{
     if(nCeny)dl(`shoptet-ceny-${dnes()}-${sest}sestav-${nCeny}variant.csv`,csv(bezNulovychCen(rows)),"text/csv");
     /* Příplatky jdou vždy celou sadou — posílají se, když se něco hnulo, když
        se ještě nikdy neposlaly, nebo když se přetlačuje celý katalog. */
-    const posliPr=!PR.znamo||PR.radky.length>0||vse;
+    const posliPr=!PR.znamo||PR.radky.length>0||PR.nove.length>0||vse;
     const nPr=posliPr?exportPriplatku(true):0;
-    if(posliPr)D.priplatkyOdeslano=snapPriplatky();
+    if(posliPr){D.priplatkyOdeslano=snapPriplatky(); D.priplatkyKody=kodyPriplatku()}
     let nKat=0;
     if(rowsK.length){
       const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
