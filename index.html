@@ -363,6 +363,7 @@ tr.unused td{background:#FEFCFB}
   <div class="row" style="margin-bottom:4px">
     <h2 style="margin:0">Sestavy</h2>
     <button class="btn btn-sm" id="addBuild">Přidat sestavu</button>
+    <button class="btn btn-sm" id="addSet" title="PC ze sestavy + monitor + periferie">Přidat set</button>
     <button class="btn btn-sm" id="expBuilds">Přehled CSV</button>
     <button class="btn btn-sm btn-primary" id="expVse" title="Ukáže, co se na e-shopu změní, a stáhne jen ty soubory, které mají co posílat">Stáhnout vše pro Shoptet ↓</button>
     <button class="btn btn-sm" id="expNavod" title="Jak na export">?</button>
@@ -957,7 +958,119 @@ function oprav(d){
     if(k.krit===undefined)k.krit=null;      // druhá, přísnější hranice pod minimem
     if(!['sklad','novy','auto'].includes(k.akt))k.akt='auto';
   }
-  return initNakupy(initNaklady(initPasmaP(initMapa(initSkrine(serad(d))))));}
+  return initSety(initNakupy(initNaklady(initPasmaP(initMapa(initSkrine(serad(d)))))));}
+/* ======== monitory a sety (v270) ========
+   Celé v try/catch: restore() při jakékoli výjimce vrátí null a aplikace by se
+   tvářila, že nemá data. Migrace proto nikdy nesmí shodit načtení. */
+const SETY_SEED=[
+  /* kód setu, kód základní sestavy (s příponou = konkrétní skříň), kódy doplňků na e-shopu, název */
+  ["S488","488",["266","593"],"SET R5 4500 + RX 470 4GB + MSI 24\" 100Hz + Trust klávesnice a myš"],
+  ["S613","613/GAM",["716","593"],"SET R5 5500 + RTX 3050 + AOC 24\" 260Hz + Trust klávesnice a myš"],
+  ["S619","619/X3",["719","596"],"SET R5 5500 + RTX 5050 + AOC 27\" 260Hz + Yenkee set"],
+  ["S482","482/X3BL",["719","596"],"SET R5 9600X + RX 9060 XT 16GB + AOC 27\" 260Hz + Yenkee set"],
+  ["S365","365/XR",["170","596"],"SET R7 9800X3D + RX 9070 XT + Samsung 32\" G65B + Yenkee set"]];
+/* Produkty setů založené na e-shopu 4. 11. 2026 (zatím skryté). */
+const SETY_URL={
+  S488:"https://www.bestcomp.cz/herni-set-pc-rx-470-ryzen-5-4500-monitor-msi-mp243x-klavesnice-mys/",
+  S613:"https://www.bestcomp.cz/herni-set-pc-rtx-3050-ryzen-5-5500-monitor-aoc-24g4zre-klavesnice-mys/",
+  S619:"https://www.bestcomp.cz/herni-set-pc-rtx-5050-ryzen-5-5500-monitor-aoc-27g4zr-klavesnice-mys-sluchatka/",
+  S482:"https://www.bestcomp.cz/herni-set-pc-rx-9060-xt-ryzen-5-9600x-monitor-aoc-27g4zr-klavesnice-mys-sluchatka/",
+  S365:"https://www.bestcomp.cz/herni-set-pc-rx-9070-xt-ryzen-7-9800x3d-monitor-samsung-odyssey-g65b-klavesnice-mys-sluchatka/"};
+/* SUF je deklarovaný až níž v kódu a při načtení dat ještě neexistuje. */
+const SETY_SKRIN={X3:"Montech X3 Black",X3BL:"Montech X3 Black",X4:"Montech X3 White",X3WH:"Montech X3 White",
+  XR:"Montech XR Black",XR2:"Montech XR White",NOR:"Fractal North Black",NOR2:"Fractal North White",GAM:"Gamemax"};
+function initSety(d){
+  try{
+    /* Monitory mají vlastní sekci, dřív ležely v Přeprodávaném zboží. Přesouvají
+       se jen z nepočítačových kategorií — v PC slotech monitor nikdy není. */
+    if(!d.migMonitory&&d.komponenty){
+      const pcKat=["CPU","Chladič","Základní deska","RAM","SSD","GPU","Zdroj","Skříň","Ostatní"];
+      const cil=d.komponenty["Monitory"]||(d.komponenty["Monitory"]=[]);
+      for(const[c,a]of Object.entries(d.komponenty)){
+        if(c==="Monitory"||pcKat.includes(c)||!Array.isArray(a))continue;
+        for(let i=a.length-1;i>=0;i--)if(/^monitor\b/i.test(String(a[i].nazev||""))){cil.push(a[i]);a.splice(i,1)}
+      }
+      cil.sort((x,y)=>String(x.nazev).localeCompare(String(y.nazev),"cs",{numeric:true}));
+      d.migMonitory=1;
+    }
+    if(!d.setySeed&&Array.isArray(d.sestavy)&&d.komponenty){
+      const kompKod=kod=>{for(const a of Object.values(d.komponenty))for(const k of a||[])if(String(k.kodEshop||"").trim()===kod)return k;return null};
+      const maKod=(x,kod)=>String(x.kod||"").split(",").map(y=>y.trim()).includes(kod);
+      for(const[kodS,zakl,dopl,nazev]of SETY_SEED){
+        if(d.sestavy.some(x=>maKod(x,kodS)))continue;
+        const b=d.sestavy.find(x=>!x.set&&maKod(x,zakl));
+        const K=dopl.map(kompKod);
+        if(!b||K.some(x=>!x))continue;
+        const suf=zakl.includes("/")?zakl.split("/")[1]:"";
+        const sk=suf&&SETY_SKRIN[suf]?(d.komponenty["Skříň"]||[]).find(x=>x.nazev===SETY_SKRIN[suf]):null;
+        d.sestavy.push({id:uid(),nazev,kod:kodS,url:SETY_URL[kodS]||"",pairCode:"",kategorie:null,drzena:null,excel:null,
+          marze:null,prace:null,hlavniKod:kodS,set:{zaklad:b.id,skrin:sk?sk.id:"",doplnky:K.map(k=>k.id),marze:null}});
+      }
+      /* Ceny doplňků na e-shopu ke 4. 11. 2026 (Shoptet konektor), než se poprvé
+         načte export produktů — pak je přepíše nactiCenyZEshopu. */
+      const E={"266":2790,"716":4300,"719":5400,"170":9900,"593":990,"596":1690};
+      for(const[kod,c]of Object.entries(E)){const k=kompKod(kod); if(k&&!(Number(k.cenaEshop)>0)){k.cenaEshop=c;k.cenaEshopKdy="2026-11-04"}}
+      d.setySeed=1;
+    }
+    for(const s of d.sestavy||[])if(s&&s.set)zajistiSet(s);
+  }catch(e){ try{console.error("initSety",e)}catch(_){} }
+  return d;}
+/* Set je sestava, která nemá vlastní komponenty PC: vyber a vyp se čtou živě
+   ze základní sestavy, jen skříň a doplňky (monitor, periferie) jsou jeho.
+   Díky tomu fungují příplatky, specifikace, odpis i exporty beze změny —
+   a změna v základní sestavě se do setu propíše sama. */
+const SET_KLIC=i=>"Set: doplněk "+(i+1);
+function zakladSetu(s){
+  if(!s||!s.set||!s.set.zaklad||typeof D==="undefined"||!D)return null;
+  return (D.sestavy||[]).find(x=>x.id===s.set.zaklad&&!x.set)||null;
+}
+function zajistiSet(s){
+  if(!s||!s.set)return s;
+  if(!Array.isArray(s.set.doplnky))s.set.doplnky=[];
+  const d=Object.getOwnPropertyDescriptor(s,"vyber");
+  if(d&&d.get)return s;
+  Object.defineProperty(s,"vyber",{configurable:true,enumerable:true,set(){},
+    get(){const b=zakladSetu(s); const v={...((b&&b.vyber)||{})};
+      if(s.set.skrin)v["Skříň"]=s.set.skrin;
+      s.set.doplnky.forEach((id,i)=>{if(id)v[SET_KLIC(i)]=id});
+      return v}});
+  Object.defineProperty(s,"vyp",{configurable:true,enumerable:true,set(){},
+    get(){const b=zakladSetu(s); return {...((b&&b.vyp)||{})}}});
+  return s;
+}
+/* Cena PC v setu je přesně cena téže varianty samostatného počítače. */
+function pcSetu(s){
+  const b=zakladSetu(s); if(!b)return null;
+  const V=varianty(b), sk=s.set.skrin||(b.vyber||{})["Skříň"];
+  const v=V.find(x=>x.k.id===sk)||V.find(x=>x.jeZaklad)||null;
+  if(v)return {b,cena:v.cenaProdej,nakup:v.nak,skrin:v.k};
+  const c=spocti(b); return {b,cena:c.prodej,nakup:c.nakup,skrin:najdiKomp((b.vyber||{})["Skříň"])};
+}
+/* Cena setu = cena PC + nákup doplňků + marže doplňků, zaokrouhleno nahoru na 400/900.
+   Marže doplňků je výchozí 0: monitory a periferie se na e-shopu prodávají těsně
+   nad nákupem, takže s marží podle pásem příplatků vycházely 4 z 5 setů dražší
+   než PC a doplňky koupené zvlášť (4. 11. 2026, S619 o 910 Kč). Vydělává se na PC
+   a na zaokrouhlení; vlastní marže doplňků jde nastavit u každého setu.
+   Jedno pásmo z celkové ceny by marži PC posunulo jen proto, že přibyl monitor. */
+function spoctiSet(s){
+  zajistiSet(s);
+  const pc=pcSetu(s);
+  const dopl=(s.set.doplnky||[]).map(najdiKomp).filter(Boolean);
+  const nakD=dopl.reduce((a,k)=>a+cena(k),0), nakDBez=bezDph(nakD);
+  const vlastniD=s.set.marze!=null&&s.set.marze!=="";
+  const marzeD=vlastniD?Number(s.set.marze):0;
+  const cenaPC=pc?pc.cena:0, nakPC=pc?pc.nakup:0;
+  const presne=cenaPC+sDph(nakDBez+marzeD);
+  const prodej=zaokrouhli(presne);
+  const nakup=nakPC+nakD, nakupBez=bezDph(nakup), marzeReal=bezDph(prodej)-nakupBez;
+  /* Kolik by zákazník zaplatil po kusech: PC podle kalkulačky, doplňky podle e-shopu.
+     Ceny doplňků z e-shopu se berou z exportu produktů (Načíst ↑ z e-shopu). */
+  const znamE=dopl.length&&dopl.every(k=>Number(k.cenaEshop)>0);
+  const zvlast=znamE?cenaPC+dopl.reduce((a,k)=>a+Number(k.cenaEshop),0):null;
+  return {set:true,chyba:pc?null:"chybí základní sestava",pc,dopl,cenaPC,nakPC,nakD,nakDBez,marzeD,vlastniD,zvlast,
+    vlastni:false,polozky:[],prace:0,nakup,nakupBez,marze:marzeReal,marzeReal,strop:null,presah:false,
+    presne,prodej,procenta:prodej?100*marzeReal/bezDph(prodej):0};
+}
 
 /* ================= výpočet ================= */
 const cena=k=>(k.akt==="novy"?Number(k.novy)||0:k.akt==="sklad"?Number(k.sklad)||0:Math.max(Number(k.sklad)||0,Number(k.novy)||0))||0;
@@ -972,6 +1085,7 @@ function najdiKomp(id){
   return null;
 }
 function spocti(s){
+  if(s&&s.set)return spoctiSet(s);
   let nakup=0; const polozky=[];
   for(const slot of SLOTS){
     const id=s.vyber[slot]; if(!id)continue;
@@ -1095,6 +1209,12 @@ function nactiCenyZEshopu(txt){
     if(kod&&KATS.length){const l=KATS.map(k=>String(r[k]||"").trim()).filter(Boolean);
       if(l.length)kats[kod]=l;}
   }
+  /* Ceny přeprodávaného zboží a monitorů na e-shopu — kvůli srovnání setu
+     s nákupem po kusech. Nákupní cenu nemění. */
+  for(const a of Object.values(D.komponenty))for(const k of a){
+    const ke=String(k.kodEshop||"").trim();
+    if(ke&&mapa[ke]!==undefined){k.cenaEshop=mapa[ke]; k.cenaEshopKdy=new Date().toISOString().slice(0,10)}
+  }
   let n=0,zm=[];
   for(const s of D.sestavy){
     const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
@@ -1147,6 +1267,10 @@ function marzeSkrine(k){
   return (v===null||v===undefined||v==="")?(Number(D.skrine.marze)||0):Number(v);
 }
 function varianty(s){
+  /* Set je jedna varianta s pevnou skříní — cena celého setu. */
+  if(s&&s.set){const c=spoctiSet(s); const sk=c.pc&&c.pc.skrin;
+    if(c.chyba||!sk)return [];
+    return [{k:sk,pr:0,extraOk:false,cenaProdej:c.prodej,nak:c.nakup,marze:c.marzeReal,jeZaklad:true,pct:c.procenta}]}
   const Sk=D.komponenty["Skříň"]||[], zaklad=spocti(s), out=[];
   const baseId=s.vyber["Skříň"]; if(!baseId)return out;
   const base=najdiKomp(baseId); if(!base)return out;
@@ -1361,7 +1485,84 @@ function osvezVypocet(t,s){
   if(lbl&&t.dataset.marze)lbl.textContent=(s.marze==null||s.marze==="")?"dle pásma":"vlastní";
   if(lbl&&t.dataset.prace)lbl.textContent=(s.prace==null)?"globální":"vlastní";
 }
+function buildSetCard(s){
+  zajistiSet(s);
+  const c=spoctiSet(s), b=c.pc?c.pc.b:zakladSetu(s);
+  const otevr=!!sestOtevrene[s.id];
+  const kodZ=(s.kod||"").split(",")[0].trim();
+  const V=b?varianty(b):[];
+  const skId=s.set.skrin||(b&&b.vyber["Skříň"])||"";
+  const mimoPC=Object.entries(D.komponenty).filter(([kat])=>!SLOTS.includes(kat));
+  const optKomp=id=>mimoPC.map(([kat,a])=>`<optgroup label="${esc(kat)}">${
+    a.map(k=>`<option value="${k.id}"${k.id===id?" selected":""}>${esc(k.nazev)} · ${Math.round(cena(k))}</option>`).join("")}</optgroup>`).join("");
+  const zakladni=D.sestavy.filter(x=>!x.set).slice().sort((x,y)=>COLL.compare(x.kod||"",y.kod||""));
+  const nazvyDopl=c.dopl.map(k=>esc(k.nazev)).join("<em>·</em>");
+  const P=b?priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]):[];
+  const _bg=b?barvaSestavy(b):"#F4F6F8";
+  return `<div class="card build${otevr?"":" sbaleno"}" data-card="${s.id}" style="--sestbg:${_bg}"><header data-sbal="${s.id}" title="Klikem do volného místa se karta sbalí">
+      <button class="sipka" data-sbal="${s.id}" title="${otevr?"Sbalit":"Rozbalit"}">${otevr?"▾":"▸"}</button>
+      ${otevr?`
+      <input type="text" value="${esc(s.nazev)}" data-sn="${s.id}">
+      <input type="text" value="${esc(s.kod||"")}" data-sk="${s.id}" placeholder="kód setu, např. S619" style="max-width:150px;font-size:12.5px">
+      <input type="text" value="${esc(s.url||"")}" data-su="${s.id}" placeholder="URL na e-shopu" style="max-width:170px;font-size:12px;color:var(--ink-3)">
+      ${s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn btn-sm" title="Otevřít na e-shopu">↗</a>`:""}
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" data-spec="${s.id}" title="Vypsat konkrétní komponenty pro zákazníka">Specifikace</button>
+      <button class="btn btn-sm btn-primary" data-exps="${s.id}" title="Stáhne CSV jen za tenhle set">Stáhnout ↓ pro Shoptet</button>
+      <button class="btn btn-sm" data-dup="${s.id}">Duplikovat</button>
+      <button class="icon-x" data-dels="${s.id}">×</button>`
+      :`
+      <div class="hlavicka">
+        <span class="band" style="background:#2C4C86;color:#fff;font-weight:700">SET</span>
+        ${kodZ?`<span class="band" style="background:rgba(255,255,255,.7);font-weight:700">${esc(kodZ)}</span>`:""}
+        <span class="hcpu">${esc(b?b.nazev:"— vyber sestavu —")}</span>
+        <span class="hdetail">${nazvyDopl}</span>
+      </div>
+      <span class="hcena">${c.chyba?"—":kc(c.prodej)}</span>`}
+    </header>
+    <div class="bwrap">
+      <div class="slots">
+        <div class="slot" style="font-weight:700"><span class="rail" style="--k:var(--signal)"></span><label>Sestava</label>
+          <select data-setz="${s.id}"><option value="">—</option>
+            ${zakladni.map(x=>`<option value="${x.id}"${b&&x.id===b.id?" selected":""}>${esc(((x.kod||"").split(",")[0].trim().split("/")[0])||"—")} · ${esc(x.nazev)}</option>`).join("")}
+          </select><span></span></div>
+        <div class="slot"><span class="rail" style="--k:${railFor("Skříň")}"></span><label>Skříň</label>
+          <select data-sets="${s.id}">
+            ${V.map(v=>`<option value="${v.k.id}"${v.k.id===skId?" selected":""}>${esc(v.k.nazev)} · PC ${Math.round(v.cenaProdej)}</option>`).join("")||`<option value="">—</option>`}
+          </select><span></span></div>
+        ${[...s.set.doplnky,""].map((id,i)=>`<div class="slot"><span class="rail" style="--k:var(--misc)"></span>
+          <label>${id?(katKomp(id)==="Monitory"?"Monitor":"Doplněk"):"+ doplněk"}</label>
+          <select data-setd="${s.id}" data-seti="${i}"><option value="">${id?"— odebrat —":"— přidat —"}</option>${optKomp(id)}</select>
+          <span class="num r muted" style="text-align:right">${id&&najdiKomp(id)?Math.round(cena(najdiKomp(id))).toLocaleString("cs-CZ"):""}</span></div>`).join("")}
+        <div class="slot" style="margin-top:4px"><span class="rail" style="--k:var(--signal)"></span><label>Marže doplňků</label>
+          <input type="number" data-setm="${s.id}" value="${c.vlastniD?s.set.marze:""}" step="100" placeholder="0">
+          <span class="muted" style="font-size:11px">${c.vlastniD?"vlast.":"bez marže"}</span></div>
+      </div>
+      <div class="calc">${c.chyba?`<div class="muted">Vyber základní sestavu.</div>`:`
+        <div class="kv"><span>PC (${esc(c.pc.skrin?c.pc.skrin.nazev:"")})</span><b>${kc(c.cenaPC)}</b></div>
+        <div class="kv"><span>Doplňky — nákup s DPH</span><b>${kc(c.nakD)}</b></div>
+        <div class="kv"><span>Marže doplňků ${c.vlastniD?"(vlastní)":"(výchozí 0)"}</span><b>${kc(c.marzeD)}</b></div>
+        <div class="kv sep"><span>Před zaokrouhlením</span><b class="muted">${kc(c.presne)}</b></div>
+        <div style="margin:6px 0 2px"><span class="price">${kc(c.prodej)}</span></div>
+        <div class="roundnote">zaokrouhleno nahoru o ${kc(c.prodej-c.presne)}</div>
+        <div class="kv sep"><span>Nákup celkem s DPH</span><b>${kc(c.nakup)}</b></div>
+        <div class="kv"><span>Skutečná marže setu</span><b style="color:${c.procenta<8?"var(--bad)":c.procenta<11?"var(--warn)":"var(--ok)"}">${kc(c.marzeReal)} · ${c.procenta.toFixed(1)} %</b></div>
+        ${c.zvlast!=null?`<div class="kv sep"><span>Po kusech (PC + doplňky z e-shopu)</span><b>${kc(c.zvlast)}</b></div>
+          <div style="font-size:12px;font-weight:700;color:${c.prodej>c.zvlast?"var(--bad)":"var(--ok)"}">${c.prodej>c.zvlast
+            ?"Set je dražší než nákup po kusech o "+kc(c.prodej-c.zvlast)+" — sniž marži doplňků"
+            :"Set je levnější o "+kc(c.zvlast-c.prodej)}</div>`
+          :`<div class="muted" style="font-size:11.5px;margin-top:6px">Ceny doplňků na e-shopu nejsou načtené — po exportu produktů se ukáže srovnání s nákupem po kusech.</div>`}`}
+      </div>
+    </div>
+    ${P.length?`<div class="vars"><div style="padding:7px 12px 3px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:700">
+      Příplatky ze sestavy ${esc(b?((b.kod||"").split(",")[0].trim().split("/")[0]):"")} (${P.length}) — zapínají se v ní</div>
+      <div style="padding:0 12px 10px;column-width:290px;column-gap:22px;font-size:11.5px;line-height:1.55">
+      ${P.map(p=>`<div class="row" style="gap:5px;padding:0"><span>${esc(p.nazev)}</span><span class="num muted" style="margin-left:auto">${kc(surPlati(p)||0)}</span></div>`).join("")}
+      </div></div>`:""}
+    </div>`;
+}
 function buildCard(s){
+  if(s&&s.set)return buildSetCard(s);
   const c=spocti(s);
   const _bg=barvaSestavy(s);
   const otevr=!!sestOtevrene[s.id];
@@ -1469,7 +1670,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=269;
+const VERZE=270;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2188,6 +2389,7 @@ function renderSest(){
   const w=$("#builds");
   const q=sestQ.trim().toLowerCase();
   const lst=D.sestavy.filter(s=>{
+    if(s.set)return false;                         // sety mají vlastní sekci pod sestavami
     if(fCpu&&cpuSestavy(s)!==fCpu)return false;
     if(fGpu&&gpuSestavy(s)!==fGpu)return false;
     if(!q)return true;
@@ -2205,8 +2407,8 @@ function renderSest(){
   /* chipy s filtry — počty se počítají z toho, co projde tím druhým filtrem */
   const chip=(txt,val,akt,poc,bg)=>`<button class="fchip" data-fc="${esc(val)}" aria-pressed="${akt}"
     style="${bg?`background:${bg}`:""}">${esc(txt)}<span class="n">${poc}</span></button>`;
-  const podleGpu=D.sestavy.filter(s=>!fGpu||gpuSestavy(s)===fGpu);
-  const podleCpu=D.sestavy.filter(s=>!fCpu||cpuSestavy(s)===fCpu);
+  const podleGpu=D.sestavy.filter(s=>!s.set&&(!fGpu||gpuSestavy(s)===fGpu));
+  const podleCpu=D.sestavy.filter(s=>!s.set&&(!fCpu||cpuSestavy(s)===fCpu));
   const cenaCpuNz=n=>{const k=(D.komponenty["CPU"]||[]).find(x=>x.nazev===n);return k?cena(k):0};
   const cpuSez=[...new Set(podleGpu.map(cpuSestavy).filter(Boolean))]
     .sort((a,b)=>jeIntel(a)-jeIntel(b)||cenaCpuNz(a)-cenaCpuNz(b)||COLL.compare(a,b));
@@ -2220,8 +2422,22 @@ function renderSest(){
     `<span style="font-size:11px;opacity:.55;width:34px">GPU</span>`
     +chip("Vše","",!fGpu,podleCpu.length,"")
     +gpuSez.map(n=>chip(n,"g:"+n,fGpu===n,podleCpu.filter(s=>gpuSestavy(s)===n).length,"")).join("");
-  w.innerHTML=lst.length?lst.map(buildCard).join("")
-    :`<div class="card" style="padding:26px;text-align:center;color:var(--ink-3)">${D.sestavy.length?"Nic neodpovídá filtru.":"Zatím žádná sestava. Přidej první."}</div>`;
+  /* Sety: filtruje se jen hledáním, CPU a GPU filtr patří k sestavám. */
+  const sety=D.sestavy.filter(s=>{
+    if(!s.set)return false; zajistiSet(s);
+    if(!q)return true;
+    const b=zakladSetu(s);
+    const t=[s.nazev,s.kod,b&&b.nazev,b&&b.kod,...(s.set.doplnky||[]).map(i=>(najdiKomp(i)||{}).nazev)].join(" ");
+    return t.toLowerCase().includes(q);
+  }).sort((a,b)=>spocti(a).prodej-spocti(b).prodej);
+  w.innerHTML=(lst.length?lst.map(buildCard).join("")
+    :`<div class="card" style="padding:26px;text-align:center;color:var(--ink-3)">${D.sestavy.length?"Nic neodpovídá filtru.":"Zatím žádná sestava. Přidej první."}</div>`)
+    +`<div class="row" style="gap:10px;align-items:baseline;margin:22px 0 8px;flex-wrap:wrap">
+        <h3 style="margin:0">Sety</h3>
+        <span class="muted" style="font-size:12px">PC ze sestavy + monitor a periferie. Komponenty PC i příplatky se berou
+          ze základní sestavy — měníš je tam.</span></div>`
+    +(sety.length?sety.map(buildCard).join("")
+      :`<div class="card" style="padding:18px;text-align:center;color:var(--ink-3)">${D.sestavy.some(s=>s.set)?"Žádný set neodpovídá hledání.":"Zatím žádný set. Přidej ho tlačítkem Přidat set."}</div>`);
   const b=$("#sestRozbal");
   if(b)b.textContent=lst.some(s=>!sestOtevrene[s.id])?"Rozbalit vše":"Sbalit vše";
   if(modalKomp)renderModal();
@@ -2335,6 +2551,10 @@ function specifikace(sid){
     }
     rad.push({slot,nazev:k.nazev,ks:Number(k.ks)||0,modely:L.map(x=>x.popis),pozn:k.modely||"",alt});
   }
+  /* Set: k PC patří monitor a periferie. */
+  if(s.set)for(const id of (s.set.doplnky||[])){const k=najdiKomp(id); if(!k)continue;
+    rad.push({slot:katKomp(id)==="Monitory"?"Monitor":"Příslušenství",nazev:k.nazev,ks:Number(k.ks)||0,
+      modely:modelyZNakupu(id).filter(x=>x.popis).map(x=>x.popis),pozn:k.modely||"",alt:[]})}
   $("#mTitle").textContent=s.nazev+" — konkrétní komponenty";
   const txt=rad.map(r=>{
     let t=`${r.slot}: ${r.nazev}${r.modely.length?" — "+r.modely.join(" / "):""}`;
@@ -6900,6 +7120,15 @@ document.addEventListener("wheel",e=>{
 },{passive:true});
 document.addEventListener("change",e=>{
   const t=e.target;
+  if(t.dataset&&(t.dataset.setz!==undefined||t.dataset.sets!==undefined||t.dataset.setd!==undefined||t.dataset.setm!==undefined)){
+    const s=D.sestavy.find(x=>x.id===(t.dataset.setz||t.dataset.sets||t.dataset.setd||t.dataset.setm));
+    if(!s||!s.set)return;
+    if(t.dataset.setz!==undefined){s.set.zaklad=t.value; s.set.skrin=""}    // jiná sestava = její základní skříň
+    else if(t.dataset.sets!==undefined)s.set.skrin=t.value;
+    else if(t.dataset.setd!==undefined){const i=Number(t.dataset.seti), D2=s.set.doplnky;
+      if(t.value){if(i<D2.length)D2[i]=t.value; else D2.push(t.value)} else if(i<D2.length)D2.splice(i,1)}
+    else s.set.marze=t.value===""?null:Number(t.value);
+    renderSest(); persist(); return}
   /* Jen uložíme vybranou hodnotu — překreslení by sebralo fokus z dalšího pole. */
   if(t.dataset.dodroz!==undefined){
     const i=Number(t.dataset.dodroz);
@@ -7133,6 +7362,16 @@ document.addEventListener("click",e=>{
       +(G.length>1?"Zůstane "+(G.length-1)+" ks z "+G.length+".":"Je to poslední kus, karta zmizí.")))return;
     D.pripravene=D.pripravene.filter(x=>x.id!==pc.id);
     renderPripravene(); renderSklad(); persist(); return}
+  if(t.id==="addSet"){
+    const n={id:uid(),nazev:"Nový set",kod:"",url:"",pairCode:"",kategorie:null,drzena:null,excel:null,
+      marze:null,prace:null,hlavniKod:null,set:{zaklad:"",skrin:"",doplnky:[],marze:null}};
+    zajistiSet(n); D.sestavy.push(n);
+    sestQ=""; const pole=$("#sestHledat"); if(pole)pole.value="";
+    sestOtevrene[n.id]=true; renderSest(); persist();
+    setTimeout(()=>{const karta=document.querySelector(`[data-card="${n.id}"]`);
+      if(karta&&karta.scrollIntoView)karta.scrollIntoView({behavior:"smooth",block:"center"})},60);
+    toast("Nový set — vyber sestavu, skříň a doplňky");
+    return}
   if(t.id==="addBuild"){
     /* Nová sestava se přidává na konec a filtr ji může schovat — zrušíme filtry,
        kartu rozbalíme a odscrollujeme na ni, ať je hned vidět. */
@@ -7154,8 +7393,10 @@ document.addEventListener("click",e=>{
     const s=D.sestavy.find(x=>x.id===t.dataset.dels); if(!s)return;
     const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
     const c=spocti(s);
-    if(confirm(`Opravdu smazat sestavu?\n\n${s.nazev||"bez názvu"}\n`
+    const setyZ=D.sestavy.filter(x=>x.set&&x.set.zaklad===s.id);
+    if(confirm(`Opravdu smazat ${s.set?"set":"sestavu"}?\n\n${s.nazev||"bez názvu"}\n`
       +`${kody.length?"varianty: "+kody.join(", ")+"\n":""}`
+      +`${setyZ.length?"\nPOZOR — je základem setů: "+setyZ.map(x=>x.kod||x.nazev).join(", ")+". Ty pak přijdou o PC a nespočítají se.\n":""}`
       +`cena ${kc(c.prodej)}\n\nNa e-shopu produkt zůstane, smaže se jen tady. Vrátit to nejde.`)){
       D.sestavy=D.sestavy.filter(x=>x.id!==t.dataset.dels);renderSest();persist();
       toast("Sestava smazána")}}
@@ -7406,6 +7647,7 @@ document.addEventListener("click",e=>{
     if(s){const n=JSON.parse(JSON.stringify(s));n.id=uid();n.nazev=s.nazev+" (kopie)";
       /* vazby na e-shop patří původnímu produktu, kopie je ještě nemá */
       n.kod=""; n.pairCode=""; n.kategorie=null; n.excel=null; n.url=""; n.hlavniKod=null; n.drzena=null;
+      if(n.set){delete n.vyber; delete n.vyp; zajistiSet(n)}
       D.sestavy.push(n);renderSest();persist();
       toast("Kopie vznikla bez kódů a vazeb na e-shop — doplň je, až produkt založíš")}}
   if(t.id==="pGenCpu"){
