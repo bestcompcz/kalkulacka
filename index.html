@@ -1154,6 +1154,14 @@ const bezSipek=v=>String(v||"").replace(/\s*>+\s*/g," > ").trim();
 /* Pro porovnání levelů: bez šipek, bez rozdílu velikosti písmen, pomlček a mezer v číslech. */
 const klicLevelu=v=>bezSipek(v).toLowerCase().replace(/[–—]/g,"-").replace(/(\d)\s+(?=\d)/g,"$1").replace(/\s+/g," ");
 const stejnyLevel=(a,b)=>klicLevelu(a)===klicLevelu(b);
+/* Produkt může mít na e-shopu levely dva (4. 11. 2026: 503, 575, 610 v Level 3
+   i Level 4). Sedí jen tehdy, když má právě jeden a ten správný. Při výměně se
+   level pošle jednou — dřív se každý level přepsal na nový a v importu byl dvakrát. */
+const levelSedi=(kats,novy)=>{const L=(kats||[]).filter(jeLevel);return L.length===1&&stejnyLevel(L[0],novy)};
+const vymenLevel=(kats,novy)=>{const out=[];let byl=false;
+  for(const k of kats||[]){if(!jeLevel(k)){out.push(k);continue}
+    if(byl)continue; byl=true; out.push(sePodleVzoru(novy,k))}
+  return out};
 const sePodleVzoru=(novy,vzor)=>/>>/.test(String(vzor||""))
   ? String(novy).replace(/\s*>\s*/g," >> ") : novy;
 function opravLevely(txt){
@@ -1175,8 +1183,8 @@ function opravLevely(txt){
     const x=prod[b];
     const stary=x.kats.find(jeLevel);
     const novy=LEVELY.find(([lim])=>x.p<=lim)[1];
-    if(stary===novy)continue;
-    zm.push({...x,base:b,stary,novy,nove:x.kats.map(k=>jeLevel(k)?sePodleVzoru(novy,k):k),KAT});
+    if(levelSedi(x.kats,novy))continue;
+    zm.push({...x,base:b,stary:x.kats.filter(jeLevel).join(" + "),novy,nove:vymenLevel(x.kats,novy),KAT});
   }
   if(!zm.length){toast("Všechny levely sedí");return}
   lvlCache={zm,KAT};
@@ -1670,7 +1678,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=270;
+const VERZE=271;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2116,7 +2124,7 @@ function zmenyCen(){
        jinak by se nesoulad zařazení nikdy neukázal. */
     const lvlStary=(s.kategorie||[]).find(jeLevel);
     const lvlNovy=LEVELY.find(([lim])=>nova<=lim)[1];
-    const spatnyLevel=!!lvlStary&&!stejnyLevel(lvlStary,lvlNovy);
+    const spatnyLevel=!!lvlStary&&!levelSedi(s.kategorie,lvlNovy);
     if(stara===null||nova!==stara||spatnyLevel)
       out.push({s,kody,kodZakl,stara,nova,vypocet,drzena:s.drzena!=null,
         jenLevel:stara===nova&&spatnyLevel});
@@ -2239,7 +2247,7 @@ function zobrazZmenyCen(){
       const r=x.stara===null?null:x.nova-x.stara;
       const lvlStary=(x.s.kategorie||[]).find(jeLevel);
       const lvlNovy=LEVELY.find(([lim])=>x.nova<=lim)[1];
-      const zmenaLvl=lvlStary&&!stejnyLevel(lvlStary,lvlNovy);
+      const zmenaLvl=lvlStary&&!levelSedi(x.s.kategorie,lvlNovy);
       return `<tr style="background:${x.drzena?"#FDE7E4":r===null?"#FFF8E1":"#FFFFFF"}">
       <td class="r"><input type="checkbox" checked data-cz="${i}" style="width:auto;cursor:pointer"></td>
       <td><strong>${esc(x.s.nazev)}</strong>${x.drzena?` <span class="band" style="background:#C0392B;color:#fff;font-weight:700"
@@ -2264,7 +2272,7 @@ let exVseCache=null;
 function novyLevel(c){return LEVELY.find(([lim])=>c<=lim)[1]}
 function meniLevel(s,nova){
   const st=(s.kategorie||[]).find(jeLevel);
-  return !!st&&!stejnyLevel(st,novyLevel(nova));
+  return !!st&&!levelSedi(s.kategorie,novyLevel(nova));
 }
 function zobrazExportVse(){
   const L=zmenyCen(), PR=zmenyPriplatku();
@@ -2309,9 +2317,9 @@ function zobrazExportVse(){
       :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Příplatky se od posledního odeslání nezměnily.</p>`}
     ${H(3,"Kategorie — cenový level")}
     ${lvl.length?`<ul style="margin:0;padding-left:18px;font-size:12.5px">
-      ${lvl.map(x=>{const st=(x.s.kategorie||[]).find(jeLevel);
+      ${lvl.map(x=>{const L=(x.s.kategorie||[]).filter(jeLevel), st=L[0];
         /* Zobrazíme level v tom tvaru, v jakém odejde do souboru. */
-        return `<li><strong>${esc(x.s.nazev)}</strong> — ${esc(st||"bez levelu")} → <strong>${esc(st?sePodleVzoru(novyLevel(x.nova),st):novyLevel(x.nova))}</strong></li>`}).join("")}</ul>
+        return `<li><strong>${esc(x.s.nazev)}</strong> — ${esc(L.length?L.join(" + "):"bez levelu")} → <strong>${esc(st?sePodleVzoru(novyLevel(x.nova),st):novyLevel(x.nova))}</strong></li>`}).join("")}</ul>
       <p class="hint" style="margin:6px 0 0">Kategorie jdou vždy zvlášť od cen — prázdný sloupec s kategorií je pro Shoptet pokyn ke smazání.</p>`
       :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Žádná sestava nemění cenový level.</p>`}
     <div class="row" style="gap:10px;margin-top:14px;align-items:center;justify-content:flex-end">
@@ -6245,10 +6253,10 @@ function exportSestavy(id){
     const nejlevnejsi=Math.min(...kody.map(cenaVarianty));
     const novyLvl=LEVELY.find(([lim])=>nejlevnejsi<=lim)[1];
     const staryLvl=s.kategorie.find(jeLevel);
-    if(staryLvl&&stejnyLevel(staryLvl,novyLvl)){
+    if(staryLvl&&levelSedi(s.kategorie,novyLvl)){
       katHlaska="level "+novyLvl.split(">").pop().trim()+" beze změny, kategorie netřeba";
     }else{
-      const seznam=s.kategorie.map(x=>jeLevel(x)?sePodleVzoru(novyLvl,x):x);
+      const seznam=vymenLevel(s.kategorie,novyLvl);
       const cols=seznam.map((_,i)=>i===0?"categoryText":"categoryText"+(i+1));
       const rk=[["code","pairCode",...cols]];
       for(const kod of kody)rk.push([kod,pairProKod(kod,s),...seznam]);
@@ -7471,7 +7479,7 @@ document.addEventListener("click",e=>{
       const V=varianty(x.s);
       const novyLvl=LEVELY.find(([lim])=>x.nova<=lim)[1];
       const staryLvl=(x.s.kategorie||[]).find(jeLevel);
-      const zmenaLvl=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
+      const zmenaLvl=!!staryLvl&&!levelSedi(x.s.kategorie,novyLvl);
       /* U držené sestavy posuneme všechny varianty o stejný rozdíl, ať si drží
          odstupy mezi skříněmi. */
       const posun=x.vypocet!=null?(x.nova-x.vypocet):0;
@@ -7480,7 +7488,7 @@ document.addEventListener("click",e=>{
         const cenaK=(v?v.cenaProdej:spocti(x.s).prodej)+posun;
         rows.push([kod,pairProKod(kod,x.s),String(Math.round(cenaK))]);
         if(zmenaLvl&&(x.s.kategorie||[]).length){
-          const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLvl,y):y);
+          const kat=vymenLevel(x.s.kategorie,novyLvl);
           rowsK.push([kod,pairProKod(kod,x.s),...kat]);
           if(kat.length>KATmax)KATmax=kat.length;
         }
@@ -7521,7 +7529,7 @@ document.addEventListener("click",e=>{
         const v=variantaProKod(x.s,V,kod);
         rows.push([kod,pairProKod(kod,x.s),String(Math.round((v?v.cenaProdej:spocti(x.s).prodej)+posun))]);
         if(zmenaLvl&&(x.s.kategorie||[]).length){
-          const kat=x.s.kategorie.map(y=>jeLevel(y)?sePodleVzoru(novyLevel(x.nova),y):y);
+          const kat=vymenLevel(x.s.kategorie,novyLevel(x.nova));
           rowsK.push([kod,pairProKod(kod,x.s),...kat]);
           if(kat.length>KATmax)KATmax=kat.length;
           novaKat=kat;
@@ -7821,9 +7829,9 @@ document.addEventListener("click",e=>{
           const cenaHl=V.length?Math.min(...V.map(x=>x.cenaProdej)):Math.round(c.prodej);
           const novyLvl=LEVELY.find(([lim])=>cenaHl<=lim)[1];
           const staryLvl=s.kategorie.find(jeLevel);
-          zmenaLevelu=!!staryLvl&&!stejnyLevel(staryLvl,novyLvl);
+          zmenaLevelu=!!staryLvl&&!levelSedi(s.kategorie,novyLvl);
           if(zmenaLevelu)lv++;
-          kat=s.kategorie.map(x=>jeLevel(x)?sePodleVzoru(novyLvl,x):x);
+          kat=vymenLevel(s.kategorie,novyLvl);
         }
         rows.push([kod,pairProKod(kod,s),String(cenaK)]); n++;
         if(zaklCena===null||cenaK<zaklCena)zaklCena=cenaK;
