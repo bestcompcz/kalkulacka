@@ -966,15 +966,15 @@ const SETY_SEED=[
   /* kód setu, kód základní sestavy (s příponou = konkrétní skříň), kódy doplňků na e-shopu, název */
   ["S488","488",["266","593"],"SET R5 4500 + RX 470 4GB + MSI 24\" 100Hz + Trust klávesnice a myš"],
   ["S613","613/GAM",["716","593"],"SET R5 5500 + RTX 3050 + AOC 24\" 260Hz + Trust klávesnice a myš"],
-  ["S619","619/X3",["719","596"],"SET R5 5500 + RTX 5050 + AOC 27\" 260Hz + Yenkee set"],
-  ["S482","482/X3BL",["719","596"],"SET R5 9600X + RX 9060 XT 16GB + AOC 27\" 260Hz + Yenkee set"],
+  ["S619","619/X3",["716","596"],"SET R5 5500 + RTX 5050 + AOC 24\" 260Hz + Yenkee set"],
+  ["S482","482/X3BL",["727","596"],"SET R5 9600X + RX 9060 XT 16GB + MSI 27\" QHD 240Hz + Yenkee set"],
   ["S365","365/XR",["170","596"],"SET R7 9800X3D + RX 9070 XT + Samsung 32\" G65B + Yenkee set"]];
 /* Produkty setů založené na e-shopu 4. 11. 2026 (zatím skryté). */
 const SETY_URL={
   S488:"https://www.bestcomp.cz/herni-set-pc-rx-470-ryzen-5-4500-monitor-msi-mp243x-klavesnice-mys/",
   S613:"https://www.bestcomp.cz/herni-set-pc-rtx-3050-ryzen-5-5500-monitor-aoc-24g4zre-klavesnice-mys/",
-  S619:"https://www.bestcomp.cz/herni-set-pc-rtx-5050-ryzen-5-5500-monitor-aoc-27g4zr-klavesnice-mys-sluchatka/",
-  S482:"https://www.bestcomp.cz/herni-set-pc-rx-9060-xt-ryzen-5-9600x-monitor-aoc-27g4zr-klavesnice-mys-sluchatka/",
+  S619:"https://www.bestcomp.cz/herni-set-pc-rtx-5050-ryzen-5-5500-monitor-aoc-24g4zre-klavesnice-mys-sluchatka/",
+  S482:"https://www.bestcomp.cz/herni-set-pc-rx-9060-xt-ryzen-5-9600x-monitor-msi-mag-275cqdf-x24-klavesnice-mys-sluchatka/",
   S365:"https://www.bestcomp.cz/herni-set-pc-rx-9070-xt-ryzen-7-9800x3d-monitor-samsung-odyssey-g65b-klavesnice-mys-sluchatka/"};
 /* SUF je deklarovaný až níž v kódu a při načtení dat ještě neexistuje. */
 const SETY_SKRIN={X3:"Montech X3 Black",X3BL:"Montech X3 Black",X4:"Montech X3 White",X3WH:"Montech X3 White",
@@ -1011,6 +1011,24 @@ function initSety(d){
       const E={"266":2790,"716":4300,"719":5400,"170":9900,"593":990,"596":1690};
       for(const[kod,c]of Object.entries(E)){const k=kompKod(kod); if(k&&!(Number(k.cenaEshop)>0)){k.cenaEshop=c;k.cenaEshopKdy="2026-11-04"}}
       d.setySeed=1;
+    }
+    /* 4. 11. 2026 večer: monitory setů podle grafiky. RX 9060 XT 16GB je na webu
+       grafika na QHD → S482 dostane MSI MAG 275CQDF X24 (27" QHD 240 Hz) místo
+       27" FullHD. RTX 5050 k 27" FullHD je měkký obraz → S619 dostane 24" AOC
+       24G4ZRE jako S613. Jednorázově, ruční změny potom už nepřepisuje. */
+    if(!d.setyFix1&&Array.isArray(d.sestavy)&&d.komponenty){
+      const kk=kod=>{for(const a of Object.values(d.komponenty))for(const k of a||[])if(String(k.kodEshop||"").trim()===kod)return k;return null};
+      const ZM=[["S482","719","727"],["S619","719","716"]];
+      for(const[kodS,stary,novy]of ZM){
+        const s=d.sestavy.find(x=>x&&x.set&&String(x.kod||"").trim()===kodS);
+        const a=kk(stary), b=kk(novy); if(!s||!a||!b)continue;
+        const i=(s.set.doplnky||[]).indexOf(a.id); if(i<0)continue;
+        s.set.doplnky[i]=b.id;
+        const z=SETY_SEED.find(x=>x[0]===kodS); if(z)s.nazev=z[3];
+        if(SETY_URL[kodS])s.url=SETY_URL[kodS];
+      }
+      const m=kk("727"); if(m&&!(Number(m.cenaEshop)>0)){m.cenaEshop=4900;m.cenaEshopKdy="2026-11-04"}
+      d.setyFix1=1;
     }
     for(const s of d.sestavy||[])if(s&&s.set)zajistiSet(s);
   }catch(e){ try{console.error("initSety",e)}catch(_){} }
@@ -1061,13 +1079,21 @@ function spoctiSet(s){
   const marzeD=vlastniD?Number(s.set.marze):0;
   const cenaPC=pc?pc.cena:0, nakPC=pc?pc.nakup:0;
   const presne=cenaPC+sDph(nakDBez+marzeD);
-  const prodej=zaokrouhli(presne);
-  const nakup=nakPC+nakD, nakupBez=bezDph(nakup), marzeReal=bezDph(prodej)-nakupBez;
   /* Kolik by zákazník zaplatil po kusech: PC podle kalkulačky, doplňky podle e-shopu.
      Ceny doplňků z e-shopu se berou z exportu produktů (Načíst ↑ z e-shopu). */
   const znamE=dopl.length&&dopl.every(k=>Number(k.cenaEshop)>0);
   const zvlast=znamE?cenaPC+dopl.reduce((a,k)=>a+Number(k.cenaEshop),0):null;
-  return {set:true,chyba:pc?null:"chybí základní sestava",pc,dopl,cenaPC,nakPC,nakD,nakDBez,marzeD,vlastniD,zvlast,
+  /* Set nesmí být dražší než nákup po kusech (v274). Doplňky jsou na e-shopu těsně
+     nad nákupem, takže zaokrouhlení nahoru na 400/900 umí set přetáhnout — S619
+     s 24" monitorem vyšel 30 400 proti 30 390 po kusech. Pak se bere nejbližší
+     cena s koncovkou 400/900 pod cenou po kusech. Vlastní marže doplňků to obchází. */
+  let prodej=zaokrouhli(presne), podKusy=false;
+  if(zvlast!=null&&!vlastniD&&prodej>=zvlast){
+    const dolu=Math.floor((zvlast-1-400)/500)*500+400;
+    if(dolu>cenaPC){prodej=dolu;podKusy=true}
+  }
+  const nakup=nakPC+nakD, nakupBez=bezDph(nakup), marzeReal=bezDph(prodej)-nakupBez;
+  return {set:true,chyba:pc?null:"chybí základní sestava",pc,dopl,cenaPC,nakPC,nakD,nakDBez,marzeD,vlastniD,zvlast,podKusy,
     vlastni:false,polozky:[],prace:0,nakup,nakupBez,marze:marzeReal,marzeReal,strop:null,presah:false,
     presne,prodej,procenta:prodej?100*marzeReal/bezDph(prodej):0};
 }
@@ -1558,7 +1584,7 @@ function buildSetCard(s){
         ${c.zvlast!=null?`<div class="kv sep"><span>Po kusech (PC + doplňky z e-shopu)</span><b>${kc(c.zvlast)}</b></div>
           <div style="font-size:12px;font-weight:700;color:${c.prodej>c.zvlast?"var(--bad)":"var(--ok)"}">${c.prodej>c.zvlast
             ?"Set je dražší než nákup po kusech o "+kc(c.prodej-c.zvlast)+" — sniž marži doplňků"
-            :"Set je levnější o "+kc(c.zvlast-c.prodej)}</div>`
+            :"Set je levnější o "+kc(c.zvlast-c.prodej)+(c.podKusy?" — cena srovnaná pod nákup po kusech (výpočet dával "+kc(zaokrouhli(c.presne))+")":"")}</div>`
           :`<div class="muted" style="font-size:11.5px;margin-top:6px">Ceny doplňků na e-shopu nejsou načtené — po exportu produktů se ukáže srovnání s nákupem po kusech.</div>`}`}
       </div>
     </div>
@@ -1678,7 +1704,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=273;
+const VERZE=274;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
