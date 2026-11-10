@@ -942,7 +942,7 @@ function initSkrine(d){
    složka mereni/ v bestcomp-data) párují sestavu — proto se ručně nezadává, ale vždy
    odvozuje z pole kod. Do v275 tu byl kód nejlevnější varianty („613/GAM") pro cenové
    levely; ten je od v276 v poli zakladniKod. Klíče sestavy[].{id,nazev,vyber,kod,
-   hlavniKod,url} a komponenty.{kategorie}[].{id,nazev,webNazev} čte Creator přímo
+   hlavniKod,url} a komponenty.{kategorie}[].{id,nazev} čte Creator přímo
    z data.json — přejmenovat je jde jen po domluvě. */
 function hlavniKodZ(kod){
   const p=String(kod||"").split(",").map(x=>x.trim()).filter(Boolean)[0];
@@ -969,10 +969,9 @@ function oprav(d){
     if(!k.dod&&DODAVATELE[k.nazev])k.dod=DODAVATELE[k.nazev];
     if(!k.novy)k.novy=k.sklad;
     if(k.ks===undefined)k.ks=null; if(k.min===undefined)k.min=null; if(k.modely===undefined)k.modely=''; if(k.kodEshop===undefined)k.kodEshop='';
-    /* webNazev = model, který se teď montuje, pro web (Content Creator). Prázdné =
-       model se střídá (typicky grafiky), web pak vezme obecný nazev. Pole modely je
-       historie nákupů, ne to, co se staví. */
-    if(typeof k.webNazev!=="string")k.webNazev=''; else k.webNazev=k.webNazev.trim();
+    /* webNazev (v276) zrušen ve v277: Content Creator píše složení na web obecně
+       podle nazev a pole nečte. Prázdné pole z dat odstraníme, vyplněné necháme být. */
+    if("webNazev" in k&&!String(k.webNazev||"").trim())delete k.webNazev;
     if(k.neomezene===undefined)k.neomezene=/office|windows/i.test(k.nazev||"");
     if(k.tower===undefined)k.tower=null;
     if(k.genericky===undefined)k.genericky=/^tower chladi/i.test(k.nazev||"");
@@ -1385,7 +1384,7 @@ function renderKomp(){
   const w=$("#blocks"); w.innerHTML="";
   const U=pouziti(), jenNep=$("#onlyUnused")&&$("#onlyUnused").checked;
   const q=kompQ.trim().toLowerCase();
-  const sedi=k=>!q||((k.nazev||"")+" "+(k.webNazev||"")+" "+(k.modely||"")+" "+(k.dod||"")+" "+(k.kodEshop||"")+" "+(k.socket||"")).toLowerCase().includes(q);
+  const sedi=k=>!q||((k.nazev||"")+" "+(k.modely||"")+" "+(k.dod||"")+" "+(k.kodEshop||"")+" "+(k.socket||"")).toLowerCase().includes(q);
   const poc={};
   for(const[cat,arr]of Object.entries(D.komponenty))
     poc[cat]=arr.filter(k=>(!jenNep||!U[k.id])&&sedi(k)).length;
@@ -1414,7 +1413,7 @@ function renderKomp(){
         <col style="width:8%"><col style="width:6%">
       </colgroup>
       <thead><tr>
-        <th>Komponenta</th><th title="Model pro web (webNazev) · pod ním poslední nákupy">Přesný model</th>
+        <th>Komponenta</th><th>Přesný model</th>
         <th>Dodavatel</th><th title="Kód produktu v Shoptetu">Kód</th>
         <th class="r" title="Kusů skladem">Ks</th>
         <th class="r">Skladová</th><th class="r">Reprod.</th>
@@ -1432,17 +1431,13 @@ function renderKomp(){
               ${naCeste(k.id)?`<span class="band" style="flex:0 0 auto;background:#E4EEFB;color:#2C5B96;white-space:nowrap"
                 title="objednáno, zatím nedodáno">+${naCeste(k.id)}</span>`:""}</div></td>
         <td style="overflow:hidden">${(()=>{const M=modelyTexty(k.id);
-            /* Nahoře model pro web (webNazev, edituje se), pod ním šedě historie z nákupů. */
-            return `<input type="text" value="${esc(k.webNazev||"")}" data-f="webNazev" data-id="${k.id}"
-                placeholder="model pro web — prázdné = střídá se"
-                title="Přesný model, který se TEĎ montuje. Čte ho web (Content Creator).&#10;Když se model střídá (typicky grafiky), nech prázdné — web použije název komponenty."
-                style="width:100%;font-size:11.5px;border-color:#E6EEF6;background:#FBFDFF">`
-            +(M.length?`<div class="row" style="gap:4px;align-items:center;min-width:0;flex-wrap:nowrap;margin-top:2px">
-              <span style="flex:1 1 auto;min-width:0;font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-                title="${esc(M.join("\n"))}">nákup: ${esc(M[0])}${M.length>1?` <em style="font-style:normal">+${M.length-1}</em>`:""}</span>
+            if(!M.length)return `<span class="muted" style="font-size:11.5px">—</span>`;
+            return `<div class="row" style="gap:4px;align-items:center;min-width:0;flex-wrap:nowrap">
+              <span style="flex:1 1 auto;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                title="${esc(M.join("\n"))}">${esc(M[0])}${M.length>1?` <em style="color:var(--ink-3);font-style:normal">+${M.length-1}</em>`:""}</span>
               <button class="icon-x" data-kopmodel="${k.id}" style="flex:0 0 auto"
                 title="Zkopírovat ${M.length>1?"všechny modely":"model"} do schránky">⧉</button>
-            </div>`:"")})()}</td>
+            </div>`})()}</td>
         <td><input type="text" value="${esc(k.dod)}" data-f="dod" data-id="${k.id}" placeholder="—"
               style="width:100%;font-size:11.5px;${stylDodavatele(k.dod)}"></td>
         <td><input type="text" value="${esc(k.kodEshop||"")}" data-f="kodEshop" data-id="${k.id}" placeholder="—"
@@ -1738,7 +1733,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=276;
+const VERZE=277;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2004,7 +1999,7 @@ function sestavCenik(){
     komp.push({kategorie:kat,id:k.id,nazev:k.nazev,
       cena:Math.round(cena(k)),
       ks:k.neomezene?null:(Number(k.ks)||0),ksExt:Number(k.ksExt)||0,
-      neomezene:!!k.neomezene,socket:k.socket||"",webNazev:k.webNazev||"",
+      neomezene:!!k.neomezene,socket:k.socket||"",
       modely:(k.modely||"").replace(/\s*\([^)]*K[čc][^)]*\)/g,"").trim()});
   }
   /* Sestavy s cenou, kterou má základní varianta na e-shopu — ne s přepočtem,
@@ -7112,7 +7107,7 @@ document.addEventListener("input",e=>{
       osvezRadekSkladu(t,k); persist();
     }}
   if(t.tagName!=="SELECT"&&t.dataset.id&&t.dataset.f){const k=najdiKomp(t.dataset.id);if(k){k[t.dataset.f]=t.type==="number"?Number(t.value):t.value;persist();
-    if(!["nazev","dod","modely","kodEshop","webNazev"].includes(t.dataset.f)){renderSest();renderSur()}}}
+    if(!["nazev","dod","modely","kodEshop"].includes(t.dataset.f)){renderSest();renderSur()}}}
   if(t.dataset.sk){const s=D.sestavy.find(x=>x.id===t.dataset.sk);if(s){s.kod=t.value;s.hlavniKod=hlavniKodZ(s.kod);persist()}}
   if(t.dataset.sn){const s=D.sestavy.find(s=>s.id===t.dataset.sn);if(s){s.nazev=t.value;persist()}}
   /* URL na e-shopu. Pole bylo v šabloně od v213, ale obsluha k němu nikdy
