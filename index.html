@@ -252,8 +252,10 @@ tr.unused td{background:#FEFCFB}
   .tbl td input[type=checkbox]{min-width:0;width:auto}
   .tbl td .row{flex-wrap:nowrap}
   .tbl td .row>input[type=text]{flex:0 0 auto}
-  .tbl td input[data-nf="popis"]{min-width:190px;max-width:200px}
-  .tbl td input[data-nf="kompText"]{min-width:118px;max-width:130px}
+  /* v280: užší Komponenta a Přesný produkt, ať se tabulka nákupů vejde i se
+     sloupcem ↩ a křížkem; celý text je v tooltipu */
+  .tbl td input[data-nf="popis"]{min-width:125px;max-width:135px}
+  .tbl td input[data-nf="kompText"]{min-width:96px;max-width:106px}
   .tbl td input[data-nf="dodavatel"]{min-width:70px;max-width:80px;padding:2px 4px}
   .tbl td select[data-nv]{min-width:38px;max-width:44px}
   .tbl td .band{font-size:10.5px;padding:2px 6px}
@@ -1737,7 +1739,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=279;
+const VERZE=280;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2963,7 +2965,7 @@ function renderNakupy(){
           value="${esc(n.komp&&K.find(x=>x.id===n.komp)?K.find(x=>x.id===n.komp).nazev:"")}"
           placeholder="mimo ceník — piš pro hledání" title="${esc(n.komp&&K.find(x=>x.id===n.komp)?K.find(x=>x.id===n.komp).kat+" · "+K.find(x=>x.id===n.komp).nazev:"")}">
       </div></td>
-      <td><div class="row" style="gap:4px"><input type="text" value="${esc(n.popis||"")}" data-nn="${n.id}" data-nf="popis" placeholder="přesný název z faktury">
+      <td><div class="row" style="gap:4px"><input type="text" value="${esc(n.popis||"")}" data-nn="${n.id}" data-nf="popis" placeholder="přesný název z faktury" title="${esc(n.popis||"")}">
         ${n.odkaz?`<a href="${esc(n.odkaz)}" target="_blank" rel="noopener" title="Otevřít u dodavatele" style="text-decoration:none;flex:0 0 auto">↗</a>`:""}</div></td>
       <td><input type="text" value="${esc(n.dodavatel||"")}" data-nn="${n.id}" data-nf="dodavatel"
         style="${stylDodavatele(n.dodavatel)}" title="${esc(n.dodavatel||"")}"></td>
