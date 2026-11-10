@@ -1737,7 +1737,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=278;
+const VERZE=279;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7161,7 +7161,12 @@ document.addEventListener("input",e=>{
     renderSest();renderSur();persist();
     if(typeof vyCache!=="undefined")vyCache=null;}
 });
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){$("#modal").hidden=true;modalKomp=null}});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape"||$("#modal").hidden)return;
+  /* Esc při psaní do pole okno nezavře (v279) — jen opustí pole. */
+  const a=document.activeElement;
+  if(a&&(a.matches("input,textarea,select")||a.isContentEditable)){a.blur();return}
+  $("#modal").hidden=true;modalKomp=null});
 document.addEventListener("DOMContentLoaded",()=>{
   const g=$("#lvlFile");
   if(g)g.addEventListener("change",()=>{
@@ -7363,7 +7368,10 @@ document.addEventListener("click",e=>{
     if(!inter||inter.dataset.sbal!==undefined){
       sestOtevrene[sbal.dataset.sbal]=!sestOtevrene[sbal.dataset.sbal];renderSest();return;}
   }
-  if(e.target.id==="modal"){$("#modal").hidden=true;modalKomp=null;return}
+  /* v279: klik vedle okna ho nezavírá. Zavíralo se i tehdy, když se v okně
+     označoval text a myš se pustila mimo něj — rozpracovaný hromadný nákup
+     zmizel. Zavírá se jen křížkem, tlačítky okna nebo Esc (mimo pole). */
+  if(e.target.id==="modal")return;
   const t=e.target.closest("button"); if(!t)return;
   if(t.id==="mClose"){$("#modal").hidden=true;modalKomp=null;return}
   if(t.id==="onlyUnused"){renderKomp()}
