@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- v278: stránka nemá být ve vyhledávačích. robots.txt by na projektové stránce
+     GitHub Pages nefungoval (musí ležet v kořeni domény bestcompcz.github.io)
+     a zákaz procházení by navíc vyhledávači nedovolil noindex vůbec přečíst. -->
+<meta name="robots" content="noindex,nofollow,noarchive">
 <title>BestComp — kalkulačka cen</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
@@ -1733,7 +1737,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=277;
+const VERZE=278;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
