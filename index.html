@@ -566,12 +566,14 @@ tr.unused td{background:#FEFCFB}
   </div>
   <datalist id="kompList"></datalist>
   <div class="card"><div class="tbl"><table id="nkTab"><thead><tr>
-    <th style="width:106px">Datum</th><th style="width:210px">Komponenta</th><th style="width:230px">Přesný produkt</th>
-    <th style="width:84px">Dodavatel</th><th style="width:52px">Ks</th><th style="width:82px" title="Cena za kus bez DPH">Bez DPH</th><th style="width:84px" title="Cena za kus včetně DPH">S DPH</th>
+    <!-- v281: na monitoru určují šířku sloupců tyhle hodnoty (#nkTab má table-layout:fixed),
+         CSS pravidla pro pole platí jen pod 1250 px. Užší, ať je vidět ↩ a křížek. -->
+    <th style="width:106px">Datum</th><th style="width:150px">Komponenta</th><th style="width:152px">Přesný produkt</th>
+    <th style="width:80px">Dodavatel</th><th style="width:52px">Ks</th><th style="width:82px" title="Cena za kus bez DPH">Bez DPH</th><th style="width:84px" title="Cena za kus včetně DPH">S DPH</th>
     <th style="width:58px">Dodáno</th>
     <th style="width:40px" title="Do externího skladu mimo Plzeň">Ext.</th>
     <th style="width:58px" title="Kolik kusů už dodavatel vyfakturoval">Fakt.</th>
-    <th style="width:46px" title="Vybráno — kandidát, ještě neobjednáno">Vyb.</th><th style="width:84px">Stav</th>
+    <th style="width:46px" title="Vybráno — kandidát, ještě neobjednáno">Vyb.</th><th style="width:78px">Stav</th>
     <th style="width:46px" title="Zaplaceno">Zapl.</th>
     <th style="width:104px" title="Slíbený termín doručení">Doručení</th>
     <th style="width:40px" title="Storno — čekám na vrácení peněz">↩</th><th style="width:30px"></th>
@@ -1739,7 +1741,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=280;
+const VERZE=281;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
