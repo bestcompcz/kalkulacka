@@ -1741,7 +1741,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=281;
+const VERZE=282;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3158,7 +3158,18 @@ function skrinZRadku(r,kod){
   /* Varianta jmenuje skříň, kterou ceník nezná — ručně postavený kus. */
   if(skrinZVarianty(r)){const nm=skrinNaMiru(); if(nm)return nm}
   const suf=String(kod||"").includes("/")?String(kod).split("/")[1]:null;
-  return (suf&&SUF[suf])?SUF[suf]:null;
+  if(suf&&SUF[suf])return SUF[suf];
+  /* v282: varianta nese jen barvu („Barva: bílá" u 461/B) — stejná řada skříně
+     jako v základu sestavy, v té barvě. Do v281 se odepsala základní černá. */
+  const vt=norm3(String((r&&(r.orderItemVariantName??r.itemVariantName))||""));
+  const bar=/\bbil[aey]?\b|white/.test(vt)?"White":/\bcern[aey]?\b|black/.test(vt)?"Black":null;
+  const s=bar?najdiSestavu(kod):null;
+  const zakl=s&&s.vyber?(najdiKomp(s.vyber["Skříň"])||{}).nazev:"";
+  if(zakl&&/\s(Black|White)$/.test(zakl)){
+    const cil=zakl.replace(/\s(Black|White)$/," "+bar);
+    if((D.komponenty["Skříň"]||[]).some(k=>k.nazev===cil))return cil;
+  }
+  return null;
 }
 function barvaZeSkrine(nm){
   if(!nm)return null;
@@ -3368,7 +3379,9 @@ function kOdpisu(txt){
           dat:den,ks:poc,castka,stav:"rozepsaná cena"});
         continue;
       }
-      if(!kod&&!sPC.has(String(C))&&jeDodatecna(nazevProdeje)){
+      /* v282: i v objednávce s počítačem. Řádek „dodatečná výměna za 5700X"
+         (20261396) do v281 prošel jako služba a odepsal se základní procesor. */
+      if(!kod&&jeDodatecna(nazevProdeje)){
         obj.push({C,kod,nazev:nazevProdeje,dat:den,ks:poc,castka,stav:"DOPLŇ VÝMĚNY"});
         dodChybi.push({C,nazev:nazevProdeje}); continue;
       }
@@ -5059,7 +5072,8 @@ function vyhodnotObdobi(txt,od,doData){
         /* Když v objednávce počítač je, je položka bez kódu rozepsaná část ceny
            (řeší se níž). Když není, je to doúčtovaný upgrade a dokud nevím,
            co se vyměnilo, výpočet se zastaví. */
-        if(!kod&&!maPC&&jeDodatecna(nzRad)){
+        /* v282: platí i v objednávce s počítačem — „dodatečná výměna za 5700X". */
+        if(!kod&&jeDodatecna(nzRad)){
           dodChybi.push({C:o.code,nazev:nzRad,cena});continue}
         let kk=kod?kompPodleKoduEshop(kod):null;
         if(!kk&&!kod)kk=komponentaZNazvuProdeje(String(r.orderItemName||""));
@@ -6529,10 +6543,13 @@ function nahradRamKolo(suma,obj,poDat){
        skladem v její den — pozdější dodávky se jí nepočítají. */
     const obj2=((poDat&&poDat.get(id))||[{dat:"",q}]).slice().sort((a,b)=>a.dat<b.dat?-1:1);
     let spotreba=0, chybi=0;   // chybi = kolik kusů se ten den nedostávalo
+    const vzate=[], chybejici=[];   // s datem objednávky, která kusy vzala / neměla
     for(const o of obj2){
       const k_dispozici=Math.max(0,ks-naskladnenoPo(id,o.dat)-spotreba);
       const vezmu=Math.min(o.q,k_dispozici);
       spotreba+=vezmu; chybi+=o.q-vezmu;
+      if(vezmu>0)vzate.push({dat:o.dat,q:vezmu});
+      if(o.q>vezmu)chybejici.push({dat:o.dat,q:o.q-vezmu});
     }
     chybi=Math.min(chybi,q);          // nikdy nenahrazuj víc, než se vůbec prodalo
     if(chybi<=0)continue;
@@ -6542,11 +6559,18 @@ function nahradRamKolo(suma,obj,poDat){
     /* Co jsme z této komponenty opravdu vzali ze skladu, zapíšeme zpět — další kolo
        tak vidí jen zbytek a nenahrazuje podruhé totéž. Náhrada jde na poloviční
        modul s datem nejstarší objednávky, která ji vyvolala. */
+    /* v282: zbytek si nese data objednávek, které kusy opravdu vzaly. Do v281
+       dostal datum NEJSTARŠÍ objednávky, takže v dalším kole vypadal, jako by
+       kusy v ten den ještě nebyly — a nahradil se podruhé. Případ 12. 11. 2026:
+       9× 32 GB DDR4 naskladněno 11. 11., objednávky z 12. 11. přesto dostaly
+       2× 16 GB místo 32 GB. Náhradní moduly dostávají datum objednávky,
+       které chyběly. */
     if(poDat){
-      const den=(obj2[0]&&obj2[0].dat)||"";
-      if(skladem>0)poDat.set(id,[{dat:den,q:skladem}]); else poDat.delete(id);
+      if(skladem>0)poDat.set(id,vzate.length?vzate:[{dat:(obj2[0]&&obj2[0].dat)||"",q:skladem}]);
+      else poDat.delete(id);
       const kam=poDat.get(pol.id)||[];
-      kam.push({dat:den,q:2*chybi});
+      for(const z of chybejici)kam.push({dat:z.dat,q:2*z.q});
+      if(!chybejici.length)kam.push({dat:(obj2[0]&&obj2[0].dat)||"",q:2*chybi});
       poDat.set(pol.id,kam);
     }
     obj.push({C:"",kod:"",nazev:chybi+"× "+k.nazev+" → "+(2*chybi)+"× "+pol.nazev,dat:"",stav:"náhrada"});
