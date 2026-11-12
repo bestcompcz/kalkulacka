@@ -860,6 +860,30 @@ function initNakupy(d){ if(!d.nakupy)d.nakupy=[]; if(!d.odpisy)d.odpisy=[];
   /* Smarty uvádí u položky jednotkovou cenu stejně jako Mironet. Doplní se jednorázově
      i do dat, která vznikla dřív — příznak brání tomu vracet to po ručním odškrtnutí. */
   if(!d.migSmartyZaKus){ if(!d.cenaZaKus.includes("smarty"))d.cenaZaKus.push("smarty"); d.migSmartyZaKus=1 }
+  /* 12. 11. 2026 (Lukáš): Spartan 5 MAX se dává JEN k R5 9600X, ke všemu ostatnímu
+     (5700X, 5800X, 7500X3D, i5-14400F, 250KF…) klasický Spartan 5. Do v282 měly MAX
+     v základu sestavy 660, 663, 683, 250KF Plus a příplatky na výměnu CPU „tower
+     v ceně". Mění se tím nákup i ceny těch sestav a příplatků. Jednorázově.
+     Zároveň: když není 350 W Evolveo, osadí se 400 W Evolveo (pole zaskok). */
+  if(!d.migSpartan1&&d.komponenty){
+    const vsechny=Object.values(d.komponenty).flat().filter(Boolean);
+    const kn=n=>vsechny.find(k=>k.nazev===n);
+    const MAX=kn("Spartan 5 MAX"), S5=kn("Spartan 5"), X96=kn("R5 9600X");
+    if(MAX&&S5&&X96){
+      for(const st of d.sestavy||[]){
+        if(!st||st.set||!st.vyber)continue;
+        if(st.vyber["Chladič"]===MAX.id&&st.vyber["CPU"]!==X96.id)st.vyber["Chladič"]=S5.id;
+      }
+      for(const pr of d.priplatky||[]){
+        if(!pr)continue;
+        if(pr.chlNa===MAX.id&&pr.to!==X96.id)pr.chlNa=S5.id;
+        if(pr.chlOd===MAX.id&&pr.from!==X96.id)pr.chlOd=S5.id;
+      }
+    }
+    const z350=kn("350 W Evolveo"), z400=kn("400 W Evolveo");
+    if(z350&&z400&&!z350.zaskok)z350.zaskok=z400.id;
+    d.migSpartan1=1;
+  }
   if(!Array.isArray(d.pripravene))d.pripravene=[];             // předem postavené počítače
   if(!Array.isArray(d.jednorazove))d.jednorazove=[];           // kódy, které se nikdy neodečítají
   /* Deska s integrovanou WiFi, kterou se osadí místo desky a modulu, když si zákazník
@@ -1741,7 +1765,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=282;
+const VERZE=283;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -3460,6 +3484,7 @@ function kOdpisu(txt){
       ks:poc,castka,stav:reverz?"storno, vrací se":(pot?"s výhradou":"ok")});
   }
   nahradWifiDesky(suma,obj,poDat,wifiKand);
+  nahradZaskok(suma,obj,poDat);
   nahradRam(suma,obj,poDat);
   return {obj,suma,chyby:[...new Set(chyby)],sluzby:[...new Set(sluzby)],dodChybi,stavy:[...stavyPocty.entries()]};
 }
@@ -6520,6 +6545,34 @@ function nahradWifiDesky(suma,obj,poDat,kand){
   for(const[kl,n]of hotovo){const[a,b,c2]=kl.split("|");
     obj.push({C:"",kod:"",nazev:n+"× "+jm(a)+" + "+n+"× "+jm(b)+" → "+n+"× "+jm(c2),
       dat:"",stav:"náhrada"})}
+}
+/* Zástup 1:1 (pole komponenty zaskok): když díl v den objednávky nebyl skladem,
+   osadil se jiný — 350 W Evolveo → 400 W Evolveo (Lukáš 12. 11. 2026). Stejná
+   logika dat jako u pamětí: kusy naskladněné až po objednávce se jí nepočítají. */
+function nahradZaskok(suma,obj,poDat){
+  for(const[id]of [...suma.entries()]){
+    const q=suma.get(id)||0; if(q<=0)continue;
+    const k=najdiKomp(id); if(!k||!k.zaskok)continue;
+    const z=najdiKomp(k.zaskok); if(!z||z.id===id)continue;
+    const ks=Math.max(0,Number(k.ks)||0);
+    const obj2=((poDat&&poDat.get(id))||[{dat:"",q}]).slice().sort((a,b)=>a.dat<b.dat?-1:1);
+    let spotreba=0; const vzate=[], chybejici=[];
+    for(const o of obj2){
+      const vezmu=Math.min(o.q,Math.max(0,ks-naskladnenoPo(id,o.dat)-spotreba));
+      spotreba+=vezmu;
+      if(vezmu>0)vzate.push({dat:o.dat,q:vezmu});
+      if(o.q>vezmu)chybejici.push({dat:o.dat,q:o.q-vezmu});
+    }
+    const chybi=Math.min(q,chybejici.reduce((a,x)=>a+x.q,0));
+    if(chybi<=0)continue;
+    if(q-chybi>0)suma.set(id,q-chybi); else suma.delete(id);
+    suma.set(z.id,(suma.get(z.id)||0)+chybi);
+    if(poDat){
+      if(vzate.length)poDat.set(id,vzate); else poDat.delete(id);
+      const kam=poDat.get(z.id)||[]; kam.push(...chybejici); poDat.set(z.id,kam);
+    }
+    obj.push({C:"",kod:"",nazev:chybi+"× "+k.nazev+" → "+chybi+"× "+z.nazev+" (není skladem)",dat:"",stav:"náhrada"});
+  }
 }
 function nahradRam(suma,obj,poDat){
   /* Náhrady se řetězí: když chybí 64GB, nahradí se dvěma 32GB — a když nejsou ani
