@@ -1458,6 +1458,8 @@ function renderKomp(){
         <td style="overflow:hidden"><div class="row" style="gap:5px;align-items:center;flex-wrap:nowrap;min-width:0">
               <button class="sipka" data-kbal="${k.id}" title="${otevr?"Sbalit":"Podrobnosti"}"
                 style="flex:0 0 auto;${detail?"":"visibility:hidden"}">${otevr?"▾":"▸"}</button>
+              <button class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny"
+                style="flex:0 0 auto;font-size:12px">📈</button>
               <input type="text" class="${U[k.id]?"used":""}" value="${esc(k.nazev)}" data-f="nazev" data-id="${k.id}"
                 style="flex:1 1 auto;min-width:0;width:100%">
               ${naCeste(k.id)?`<span class="band" style="flex:0 0 auto;background:#E4EEFB;color:#2C5B96;white-space:nowrap"
@@ -1487,7 +1489,6 @@ function renderKomp(){
         </span></td>
         <td class="r" style="white-space:nowrap">
             <span class="use ${U[k.id]?"":"zero"}" data-kde="${k.id}" title="${U[k.id]?"použito v "+U[k.id]+" sestavách":"nepoužito"}">${U[k.id]||0}</span><button
-             class="icon-x" data-hist="${k.id}" title="Historie nákupů a vývoj ceny">📈</button><button
              class="icon-x" data-del="${k.id}" title="Smazat">×</button></td>
       </tr>
       ${otevr?`<tr class="kdetail"><td colspan="10" style="background:#FAFBFC">
@@ -1765,7 +1766,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=283;
+const VERZE=284;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
