@@ -1676,11 +1676,12 @@ function buildCard(s){
           style="max-width:170px;font-size:12px;color:var(--ink-3)">
         ${s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn btn-sm" title="Otevřít na e-shopu">↗</a>`:""}
         ${s.drzena!=null?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:5px"
-          title="Cena, na které sestavu držíš. Do exportů se nezahrne, dokud držení nezrušíš.">držím
+          title="Cena, kterou chceš mít na e-shopu. Jde do nejbližšího importu cen místo vypočtené; ostatní varianty se posunou o stejný rozdíl.">držím
           <input type="number" value="${s.drzena}" data-drzc="${s.id}"
             style="width:76px;padding:1px 4px;text-align:right;font-weight:700;font-size:12px;
                    border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.18);color:#fff"></span>
-          <button class="btn btn-sm" data-odrz="${s.id}" title="Zrušit držení a používat vypočtenou cenu">Zrušit držení</button>`:""}
+          <button class="btn btn-sm" data-odrz="${s.id}" title="Zrušit držení a používat vypočtenou cenu">Zrušit držení</button>`
+          :`<button class="btn btn-sm" data-drz="${s.id}" title="Nastavit cenu ručně — třeba akci. Drží se, dokud ji nezrušíš.">Držet cenu</button>`}
         <span style="flex:1"></span>
         <button class="btn btn-sm" data-spec="${s.id}" title="Vypsat konkrétní komponenty pro zákazníka">Specifikace</button>
         <button class="btn btn-sm btn-primary" data-exps="${s.id}" title="Stáhne CSV jen za tuhle sestavu, pak ho importuješ v Shoptetu">Stáhnout ↓ pro Shoptet</button>
@@ -1766,7 +1767,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=284;
+const VERZE=285;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7813,6 +7814,22 @@ document.addEventListener("click",e=>{
     const vse=t.textContent.startsWith("Rozbalit");
     for(const s of D.sestavy)sestOtevrene[s.id]=vse;
     renderSest();return}
+  if(t.dataset.drz){const s=D.sestavy.find(x=>x.id===t.dataset.drz);
+    if(s){
+      /* Cenu se ptáme rovnou. Nastavit ji nejdřív na vypočtenou nejde — renderSest()
+         volá uklidDrzeni(), a ta držení se shodnou cenou hned zase zruší. */
+      const V=varianty(s), vyp=V.length?Math.min(...V.map(v=>v.cenaProdej)):spocti(s).prodej;
+      const odp=prompt(`Jakou cenu držet u "${s.nazev}"?\n\nVýpočet dává ${kc(vyp)} (základní varianta).\n`
+        +`Ostatní varianty se posunou o stejný rozdíl.`,String(vyp));
+      if(odp!==null){
+        const c=Math.round(Number(String(odp).replace(/\s/g,"").replace(",",".")));
+        if(!isFinite(c)||c<=0)toast("To není cena");
+        else if(c===Math.round(vyp))toast("Stejná cena jako výpočet — není co držet");
+        else{s.drzena=c;renderSest();persist();
+          toast(`Držím ${kc(c)}. Půjde do nejbližšího importu cen.`);}
+      }
+    }
+    return}
   if(t.dataset.odrz){const s=D.sestavy.find(x=>x.id===t.dataset.odrz);
     if(s){s.drzena=null;renderSest();persist();toast("Držení zrušeno, platí vypočtená cena");
       /* Když se pustilo z okna naskladnění, překreslíme ho, ať řádek zmizí. */
