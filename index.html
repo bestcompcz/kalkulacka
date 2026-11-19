@@ -1778,7 +1778,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=288;
+const VERZE=289;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7697,8 +7697,8 @@ document.addEventListener("click",e=>{
       for(const kod of kodyZakladniVarianty(x.s))
         rowsB.push([kod,pairProKod(kod,x.s),String(Math.round(x.s.drzenaBezna))]);
     }
-    if(rowsB.length)dl(`shoptet-bezna-cena-${dnes()}-${rowsB.length}variant.csv`,
-      csv([["code","pairCode","commonPrice"],...rowsB]),"text/csv");
+    if(rowsB.length)dl(`shoptet-standardni-cena-${dnes()}-${rowsB.length}variant.csv`,
+      csv([["code","pairCode","standardPrice"],...rowsB]),"text/csv");
     if(rowsK.length){
       const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
       dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
@@ -7767,8 +7767,8 @@ document.addEventListener("click",e=>{
       for(const kod of kodyZakladniVarianty(x.s))
         rowsB.push([kod,pairProKod(kod,x.s),String(Math.round(x.s.drzenaBezna))]);
     }
-    if(rowsB.length)dl(`shoptet-bezna-cena-${dnes()}-${rowsB.length}variant.csv`,
-      csv([["code","pairCode","commonPrice"],...rowsB]),"text/csv");
+    if(rowsB.length)dl(`shoptet-standardni-cena-${dnes()}-${rowsB.length}variant.csv`,
+      csv([["code","pairCode","standardPrice"],...rowsB]),"text/csv");
     /* Příplatky jdou vždy celou sadou — posílají se, když se něco hnulo, když
        se ještě nikdy neposlaly, nebo když se přetlačuje celý katalog. */
     const posliPr=!PR.znamo||PR.radky.length>0||PR.nove.length>0||vse;
@@ -7786,7 +7786,7 @@ document.addEventListener("click",e=>{
     if(nCeny)kroky.push(`Importuj <strong>shoptet-ceny-…csv</strong> — ${nCeny} variant u ${sest} sestav.`);
     if(nPr)kroky.push(`Importuj <strong>shoptet-priplatky-…csv</strong> — ${nPr} řádků, celá sada příplatků.`);
     if(nKat)kroky.push(`Importuj <strong>shoptet-kategorie-…csv</strong> — ${nKat} variant mění cenový level. Nikdy ve stejném souboru s cenami.`);
-    if(rowsB.length)kroky.push(`Importuj <strong>shoptet-bezna-cena-…csv</strong> — ${rowsB.length} variant dostane přeškrtnutou běžnou cenu. Taky nikdy ve stejném souboru s cenami.`);
+    if(rowsB.length)kroky.push(`Importuj <strong>shoptet-standardni-cena-…csv</strong> — ${rowsB.length} variant dostane přeškrtnutou standardní cenu. Taky nikdy ve stejném souboru s cenami.`);
     $("#mTitle").textContent=kroky.length?"Staženo — co teď ve Shoptetu":"Nebylo co posílat";
     $("#mBody").innerHTML=kroky.length?`
       <ol style="font-size:13px;line-height:1.7;margin:0 0 10px;padding-left:20px">
@@ -7902,8 +7902,8 @@ document.addEventListener("click",e=>{
       if(meloSlevu&&kodyB.length&&confirm(`Běžela sleva z ${kc(bezna)}.\n\n`
         +`Stáhnout soubor, který na e-shopu smaže přeškrtnutou běžnou cenu? ${kodyB.length} variant.\n`
         +`Bez něj tam zůstane svítit dál.`)){
-        dl(`shoptet-bezna-cena-konec-${dnes()}-${kodyB.length}variant.csv`,
-          csv([["code","pairCode","commonPrice"],...kodyB.map(k=>[k,pairProKod(k,s),""])]),"text/csv");
+        dl(`shoptet-standardni-cena-konec-${dnes()}-${kodyB.length}variant.csv`,
+          csv([["code","pairCode","standardPrice"],...kodyB.map(k=>[k,pairProKod(k,s),""])]),"text/csv");
       }
       toast(meloSlevu?"Sleva i držení zrušeny, platí vypočtená cena":"Držení zrušeno, platí vypočtená cena");
       /* Když se pustilo z okna naskladnění, překreslíme ho, ať řádek zmizí. */
