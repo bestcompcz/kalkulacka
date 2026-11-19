@@ -1778,7 +1778,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=287;
+const VERZE=288;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7758,6 +7758,17 @@ document.addEventListener("click",e=>{
     }
     const nCeny=rows.length-1;
     if(nCeny)dl(`shoptet-ceny-${dnes()}-${sest}sestav-${nCeny}variant.csv`,csv(bezNulovychCen(rows)),"text/csv");
+    /* Běžná (přeškrtnutá) cena jde zvlášť — ve společném souboru by prázdný
+       sloupec smazal běžnou cenu u všeho ostatního, protože import Shoptetu jen
+       přepisuje, co vidí. Jen u variant se základní cenou (§3a dokumentu). */
+    const rowsB=[];
+    for(const x of vyb){
+      if(x.s.drzenaBezna==null)continue;
+      for(const kod of kodyZakladniVarianty(x.s))
+        rowsB.push([kod,pairProKod(kod,x.s),String(Math.round(x.s.drzenaBezna))]);
+    }
+    if(rowsB.length)dl(`shoptet-bezna-cena-${dnes()}-${rowsB.length}variant.csv`,
+      csv([["code","pairCode","commonPrice"],...rowsB]),"text/csv");
     /* Příplatky jdou vždy celou sadou — posílají se, když se něco hnulo, když
        se ještě nikdy neposlaly, nebo když se přetlačuje celý katalog. */
     const posliPr=!PR.znamo||PR.radky.length>0||PR.nove.length>0||vse;
@@ -7775,6 +7786,7 @@ document.addEventListener("click",e=>{
     if(nCeny)kroky.push(`Importuj <strong>shoptet-ceny-…csv</strong> — ${nCeny} variant u ${sest} sestav.`);
     if(nPr)kroky.push(`Importuj <strong>shoptet-priplatky-…csv</strong> — ${nPr} řádků, celá sada příplatků.`);
     if(nKat)kroky.push(`Importuj <strong>shoptet-kategorie-…csv</strong> — ${nKat} variant mění cenový level. Nikdy ve stejném souboru s cenami.`);
+    if(rowsB.length)kroky.push(`Importuj <strong>shoptet-bezna-cena-…csv</strong> — ${rowsB.length} variant dostane přeškrtnutou běžnou cenu. Taky nikdy ve stejném souboru s cenami.`);
     $("#mTitle").textContent=kroky.length?"Staženo — co teď ve Shoptetu":"Nebylo co posílat";
     $("#mBody").innerHTML=kroky.length?`
       <ol style="font-size:13px;line-height:1.7;margin:0 0 10px;padding-left:20px">
