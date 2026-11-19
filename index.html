@@ -798,7 +798,7 @@ function fresh(){
 }
 function uid(){return Math.random().toString(36).slice(2,9)}
 function novaSestava(n){return{id:uid(),nazev:n||"Nová sestava",vyber:{},prace:null,
-  kod:"",pairCode:"",url:"",marze:null,vyp:{},kategorie:[],excel:null,drzena:null}}
+  kod:"",pairCode:"",url:"",marze:null,vyp:{},kategorie:[],excel:null,drzena:null,drzenaBezna:null}}
 
 /* --------- persistence: localStorage když jde, jinak jen paměť --------- */
 const KEY="bestcomp-kalk-v2";
@@ -941,7 +941,7 @@ function initPasmaP(d){
   return d;}
 function initMapa(d){
   if(!d.mapa)d.mapa={...MAPA_DEF};
-  for(const s of d.sestavy){ if(s.kod===undefined)s.kod=""; if(!s.vyp)s.vyp={}; if(s.marze===undefined)s.marze=null; if(s.url===undefined)s.url=""; if(s.pairCode===undefined)s.pairCode=""; if(s.kategorie===undefined)s.kategorie=null; if(s.drzena===undefined)s.drzena=null; }
+  for(const s of d.sestavy){ if(s.kod===undefined)s.kod=""; if(!s.vyp)s.vyp={}; if(s.marze===undefined)s.marze=null; if(s.url===undefined)s.url=""; if(s.pairCode===undefined)s.pairCode=""; if(s.kategorie===undefined)s.kategorie=null; if(s.drzena===undefined)s.drzena=null; if(s.drzenaBezna===undefined)s.drzenaBezna=null; }
   for(const n of (d.nakupy||[])){ if(n.zaplaceno===undefined)n.zaplaceno=false; if(n.vratka===undefined)n.vratka=null; if(n.zaskl===undefined)n.zaskl=0;
     if(n.vyber===undefined)n.vyber=false;     // vybráno = kandidát, ještě neobjednáno
     if(n.doruceni===undefined)n.doruceni=null;     // slíbený termín doručení
@@ -1676,10 +1676,10 @@ function buildCard(s){
           style="max-width:170px;font-size:12px;color:var(--ink-3)">
         ${s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn btn-sm" title="Otevřít na e-shopu">↗</a>`:""}
         ${s.drzena!=null?`<span class="band" style="background:#C0392B;color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:5px"
-          title="Cena, kterou chceš mít na e-shopu. Jde do nejbližšího importu cen místo vypočtené; ostatní varianty se posunou o stejný rozdíl.">držím
+          title="${s.drzenaBezna!=null?`Sleva ${kc(s.drzena)} z přeškrtnuté běžné ceny ${kc(s.drzenaBezna)}. `:""}Cena, kterou chceš mít na e-shopu; ostatní varianty se posunou o stejný rozdíl. Posílá se ze Změn cen ↓ a ze Stáhnout vše — Export cen celého katalogu tuhle sestavu vynechá.">držím
           <input type="number" value="${s.drzena}" data-drzc="${s.id}"
             style="width:76px;padding:1px 4px;text-align:right;font-weight:700;font-size:12px;
-                   border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.18);color:#fff"></span>
+                   border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.18);color:#fff">${s.drzenaBezna!=null?`<span style="font-size:11px;opacity:.9;text-decoration:line-through">${kc(s.drzenaBezna)}</span>`:""}</span>
           <button class="btn btn-sm" data-odrz="${s.id}" title="Zrušit držení a používat vypočtenou cenu">Zrušit držení</button>`
           :`<button class="btn btn-sm" data-drz="${s.id}" title="Nastavit cenu ručně — třeba akci. Drží se, dokud ji nezrušíš.">Držet cenu</button>`}
         <span style="flex:1"></span>
@@ -1752,12 +1752,23 @@ function buildCard(s){
 }
 /* Držení má smysl jen tak dlouho, dokud se výpočet od držené ceny liší.
    Jakmile se potkají, příznak se sám zruší — jinak by tiše blokoval export. */
+/* Běžná (přeškrtnutá) cena se zapisuje jen k variantám se základní cenou.
+   U dražších skříní neznáme, za kolik se opravdu nabízely, a sleva z ceny,
+   kterou nedoložíme, je riziko podle § 12a. */
+function kodyZakladniVarianty(s){
+  const kody=(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean);
+  if(!kody.length)return [];
+  const V=varianty(s), c=spocti(s);
+  const cena=kod=>{const v=variantaProKod(s,V,kod); return Math.round(v?v.cenaProdej:c.prodej)};
+  const nej=Math.min(...kody.map(cena));
+  return kody.filter(k=>cena(k)===nej);
+}
 function uklidDrzeni(){
   let zmena=0;
   for(const s of D.sestavy){
     if(s.drzena==null)continue;
     const V=varianty(s); if(!V.length)continue;
-    if(Math.min(...V.map(v=>v.cenaProdej))===Number(s.drzena)){s.drzena=null;zmena++}
+    if(Math.min(...V.map(v=>v.cenaProdej))===Number(s.drzena)){s.drzena=null;s.drzenaBezna=null;zmena++}
   }
   return zmena;
 }
@@ -1767,7 +1778,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=285;
+const VERZE=286;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7669,13 +7680,24 @@ document.addEventListener("click",e=>{
     }
     const kody=vyb.map(x=>x.kodZakl.split("/")[0]).join("-").slice(0,40);
     dl(`shoptet-ceny-${dnes()}-${vyb.length}sestav-${rows.length-1}variant-${kody}.csv`,csv(bezNulovychCen(rows)),"text/csv");
+    /* Běžná cena jde zvlášť. Ve společném souboru by prázdný sloupec u ostatních
+       sestav smazal běžnou cenu všude — import Shoptetu jen přepisuje, co vidí. */
+    const rowsB=[];
+    for(const x of vyb){
+      if(x.s.drzenaBezna==null)continue;
+      for(const kod of kodyZakladniVarianty(x.s))
+        rowsB.push([kod,pairProKod(kod,x.s),String(Math.round(x.s.drzenaBezna))]);
+    }
+    if(rowsB.length)dl(`shoptet-bezna-cena-${dnes()}-${rowsB.length}variant.csv`,
+      csv([["code","pairCode","commonPrice"],...rowsB]),"text/csv");
     if(rowsK.length){
       const cols=[]; for(let k=1;k<=KATmax;k++)cols.push(k===1?"categoryText":"categoryText"+k);
       dl(`shoptet-kategorie-${dnes()}-${rowsK.length}variant.csv`,
         csv([["code","pairCode",...cols],...rowsK.map(r=>[r[0],r[1],...cols.map((_,i)=>r[2+i]||"")])]),"text/csv");
     }
     cenyCache=null;$("#modal").hidden=true;renderSest();persist();
-    toast(`${rows.length-1} variant`+(lvl?` · ${lvl} mění level, kategorie zvlášť`:"")+(drz.length?` · ${drz.length} drží cenu`:""));
+    toast(`${rows.length-1} variant`+(lvl?` · ${lvl} mění level, kategorie zvlášť`:"")
+      +(rowsB.length?` · běžná cena pro ${rowsB.length} variant zvlášť`:"")+(drz.length?` · ${drz.length} drží cenu`:""));
     return}
   if(t.id==="expVse"){zobrazExportVse();return}
   if(t.id==="exVseZrus"){exVseCache=null;$("#modal").hidden=true;return}
@@ -7825,13 +7847,44 @@ document.addEventListener("click",e=>{
         const c=Math.round(Number(String(odp).replace(/\s/g,"").replace(",",".")));
         if(!isFinite(c)||c<=0)toast("To není cena");
         else if(c===Math.round(vyp))toast("Stejná cena jako výpočet — není co držet");
-        else{s.drzena=c;renderSest();persist();
-          toast(`Držím ${kc(c)}. Půjde do nejbližšího importu cen.`);}
+        else{
+          s.drzena=c; s.drzenaBezna=null;
+          /* Přeškrtnutá běžná cena má smysl jen když jdeme pod cenu, která na
+             e-shopu opravdu je — proto se ptáme jen tehdy a nabízíme právě ji.
+             Sleva z ceny, co nikdy neplatila, je přesně to, co § 12a zakazuje. */
+          const naEshopu=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
+          if(naEshopu!=null&&c<naEshopu){
+            const b=prompt(`Udělat z toho slevu?\n\n`
+              +`Zadej původní cenu, která se zákazníkovi přeškrtne. Na e-shopu je teď ${kc(naEshopu)}.\n`
+              +`Podle § 12a to musí být nejnižší cena za posledních 30 dní — ověř si to.\n\n`
+              +`Prázdné nebo Zrušit = jen držená cena, bez přeškrtnutí.`,String(naEshopu));
+            if(b!==null&&String(b).trim()!==""){
+              const bc=Math.round(Number(String(b).replace(/\s/g,"").replace(",",".")));
+              if(!isFinite(bc)||bc<=c)toast("Původní cena musí být vyšší než slevová — sleva nenastavena");
+              else s.drzenaBezna=bc;
+            }
+          }
+          renderSest();persist();
+          toast(s.drzenaBezna!=null
+            ?`Sleva ${kc(c)} z ${kc(s.drzenaBezna)}. Ceny i běžnou cenu stáhneš ve Změnách cen ↓.`
+            :`Držím ${kc(c)}. Půjde do nejbližšího importu ze Změn cen ↓.`);}
       }
     }
     return}
   if(t.dataset.odrz){const s=D.sestavy.find(x=>x.id===t.dataset.odrz);
-    if(s){s.drzena=null;renderSest();persist();toast("Držení zrušeno, platí vypočtená cena");
+    if(s){
+      /* Po skončení akce se běžná cena na e-shopu musí smazat, jinak tam
+         přeškrtnutá cena svítí dál. Proto soubor nabídneme hned. */
+      const meloSlevu=s.drzenaBezna!=null, kodyB=meloSlevu?kodyZakladniVarianty(s):[];
+      const bezna=s.drzenaBezna;
+      s.drzena=null; s.drzenaBezna=null; renderSest(); persist();
+      if(meloSlevu&&kodyB.length&&confirm(`Běžela sleva z ${kc(bezna)}.\n\n`
+        +`Stáhnout soubor, který na e-shopu smaže přeškrtnutou běžnou cenu? ${kodyB.length} variant.\n`
+        +`Bez něj tam zůstane svítit dál.`)){
+        dl(`shoptet-bezna-cena-konec-${dnes()}-${kodyB.length}variant.csv`,
+          csv([["code","pairCode","commonPrice"],...kodyB.map(k=>[k,pairProKod(k,s),""])]),"text/csv");
+      }
+      toast(meloSlevu?"Sleva i držení zrušeny, platí vypočtená cena":"Držení zrušeno, platí vypočtená cena");
       /* Když se pustilo z okna naskladnění, překreslíme ho, ať řádek zmizí. */
       if(t.dataset.znovu&&!$("#modal").hidden)zobrazVse();}
     return}
@@ -7839,7 +7892,7 @@ document.addEventListener("click",e=>{
   if(t.dataset.dup){const s=D.sestavy.find(s=>s.id===t.dataset.dup);
     if(s){const n=JSON.parse(JSON.stringify(s));n.id=uid();n.nazev=s.nazev+" (kopie)";
       /* vazby na e-shop patří původnímu produktu, kopie je ještě nemá */
-      n.kod=""; n.pairCode=""; n.kategorie=null; n.excel=null; n.url=""; n.hlavniKod=null; n.drzena=null;
+      n.kod=""; n.pairCode=""; n.kategorie=null; n.excel=null; n.url=""; n.hlavniKod=null; n.drzena=null; n.drzenaBezna=null;
       if(n.set){delete n.vyber; delete n.vyp; zajistiSet(n)}
       D.sestavy.push(n);renderSest();persist();
       toast("Kopie vznikla bez kódů a vazeb na e-shop — doplň je, až produkt založíš")}}
