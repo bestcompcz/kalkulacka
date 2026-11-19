@@ -1778,7 +1778,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=286;
+const VERZE=287;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -6354,9 +6354,18 @@ function exportSestavy(id){
     return Math.round(v?v.cenaProdej:c.prodej);
   };
   if(s.drzena!=null){
+    /* Tenhle export posílá vypočtenou cenu, takže držení i slevu ruší. Do v286
+       se rušila jen `drzena` a `drzenaBezna` zůstala — sestava pak neměla držení,
+       ale pořád nesla přeškrtnutou cenu, a ta by se poslala proti ceně, která jí
+       je rovná. Na akci se tenhle export nepoužívá, jde se přes Změny cen ↓. */
     if(!confirm(`Sestava má drženou cenu ${kc(s.drzena)}, výpočet dává ${kc(c.prodej)}.\n\n`
-      +`Exportovat novou cenu a držení zrušit?`))return;
-    s.drzena=null; renderSest(); persist();
+      +(s.drzenaBezna!=null
+        ? `POZOR: zruší se i sleva (přeškrtnutá cena ${kc(s.drzenaBezna)}).\n`
+          +`Na e-shopu bude svítit dál, dokud ji nesmažeš souborem z Zrušit držení.\n\n`
+        : ``)
+      +`Exportovat vypočtenou cenu a držení zrušit?\n\n`
+      +`Na akci tohle tlačítko nepoužívej — slevu posílají Změny cen ↓.`))return;
+    s.drzena=null; s.drzenaBezna=null; renderSest(); persist();
   }
   const jm=(s.nazev||"sestava").replace(/[^\p{L}\p{N}]+/gu,"-").replace(/^-|-$/g,"").slice(0,40);
   const zaklad=kody[0].split("/")[0];
