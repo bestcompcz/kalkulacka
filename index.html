@@ -332,6 +332,7 @@ tr.unused td{background:#FEFCFB}
     <button class="tab" role="tab" aria-selected="false" data-p="p-sklad">Sklad</button>
     <button class="tab" role="tab" aria-selected="false" data-p="p-prip">Připraveno</button>
     <button class="tab" role="tab" aria-selected="false" data-p="p-sest">Sestavy</button>
+    <button class="tab" role="tab" aria-selected="false" data-p="p-kand">Kandidáti na slevu</button>
     <button class="tab" role="tab" aria-selected="false" data-p="p-pripl">Příplatky</button>
     <button class="tab" role="tab" aria-selected="false" data-p="p-nakup">Nákupy</button>
     <button class="tab" role="tab" aria-selected="false" data-p="p-prodej">Prodeje</button>
@@ -397,6 +398,20 @@ tr.unused td{background:#FEFCFB}
   </div>
   <p class="hint">Před generováním cen nahraj aktuální export produktů s kategoriemi přes <strong>Načíst ↑ z e-shopu do kalkulačky</strong> — jinak se neopraví cenové levely. Marže se bere podle pásma, do kterého spadne výsledná cena s DPH. Zaokrouhluje se vždy nahoru na koncovku 400 nebo 900.</p>
   <div id="builds"></div>
+</section>
+
+<!-- ============ KANDIDÁTI NA SLEVU (v292, #154) ============ -->
+<section class="panel" id="p-kand" hidden>
+  <div class="row" style="margin-bottom:4px">
+    <h2 style="margin:0">Kandidáti na slevu</h2>
+    <button class="btn btn-sm" id="kandObnov" title="Znovu načíst data trhu z repozitáře">Trh ↻</button>
+    <span class="muted" id="kandStav" style="font-size:12px"></span>
+  </div>
+  <p class="hint">Sestavy, u kterých by stačilo zlevnit, abychom byli o 100–500 Kč levnější než nejlevnější srovnatelná nabídka (cílovou cenu počítá střižna, RAM srovnaná příplatkem). Marže je bez DPH nad dnešním nákupem dílů s prací a Windows, u základní varianty. Přeškrtnutá cena = nejnižší cena za 30 dní (§ 12a). Červeně = marže po slevě pod 1 500 Kč nebo pod polovinou cílové marže — nedoporučeno.</p>
+  <div class="tbl"><table><thead><tr>
+    <th>Sestava</th><th class="r">Naše</th><th class="r">Cílová</th><th class="r">Sleva</th><th>Proti</th>
+    <th class="r">Marže teď</th><th class="r">Marže po slevě</th><th class="r">Přeškrtnout</th><th></th>
+  </tr></thead><tbody id="kandBody"></tbody></table></div>
 </section>
 
 <!-- ============ PŘÍPLATKY ============ -->
@@ -1700,7 +1715,7 @@ async function trhNacti(rucne){
     TRH={akt}; TRH_CHYBA="";
     if(rucne)toast("Trh načten — stav "+trhKdy());
   }catch(e){TRH_CHYBA="Trh se nepodařilo načíst: "+e.message;if(rucne)toast(TRH_CHYBA)}
-  finally{TRH_BEZI=false;renderSest();const b=$("#trhObnov");if(b)b.title="Ceny trhu — stav "+trhKdy()}
+  finally{TRH_BEZI=false;renderSest();renderKand();const b=$("#trhObnov");if(b)b.title="Ceny trhu — stav "+trhKdy()}
 }
 function trhKdy(){
   const c=TRH&&TRH.akt&&TRH.akt.cas; if(!c)return "neznámý";
@@ -1802,6 +1817,82 @@ function trhDetail(sid){
     }).join("")
     +`<div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end"><button class="btn btn-sm btn-primary" id="trhZavri">Zavřít</button></div>`;
   modalKomp=null; $("#modal").hidden=false;
+}
+/* ======== KANDIDÁTI NA SLEVU (v292, issue #154) ========
+   Seznam `kandidati[]` i cílovou cenu počítá střižna v konkurence.py (pásmo
+   100–500 Kč pod nejlevnější srovnatelnou nabídkou, koncovka 400/900, RAM
+   srovnaná příplatkem oběma směry). Úpravy pravidel patří do #154, ne sem.
+   Kalkulačka k tomu přidává jen to, co mimo ni nesmí: marži teď a po slevě
+   (bez DPH, nad dnešním nákupem základní varianty s prací a Windows).
+   Naše cena je živá (drzena → excel), takže po slevě kandidát ukáže „hotovo“.
+   Přeškrtnutá cena: když naše cena platí 30 dní, je to ona, jinak
+   nejnižší cena za 30 dní (§ 12a, z ceny/historie.csv). */
+const KAND_MIN=1500;
+function kandSestava(kod){return D.sestavy.find(s=>!s.set&&s.hlavniKod===String(kod))||null}
+function kandNakupBez(s){
+  const V=varianty(s);
+  if(V.length){const z=V.slice().sort((a,b)=>a.cenaProdej-b.cenaProdej)[0];return bezDph(z.nak)}
+  return spocti(s).nakupBez;
+}
+function kandPreskrt(k){return k.cena_drzena_30_dni?Number(k.nase_cena):Number(k.nejnizsi_30_dni)||null}
+function kandRadek(k){
+  const s=kandSestava(k.kod), jm=((TRH.akt.obchody||{})[k.obchod])||k.obchod;
+  const cil=Number(k.cilova_cena);
+  if(!s)return `<tr><td>${esc(k.kod)} · ${esc(k.nazev||"")}</td><td colspan="8" class="muted">sestava v kalkulačce není</td></tr>`;
+  const nase=trhNase(s), nakB=kandNakupBez(s), cilM=spocti(s).marze;
+  const mTed=bezDph(nase)-nakB, mPo=bezDph(cil)-nakB, sleva=nase-cil;
+  const hotovo=sleva<=0;
+  const tr=mPo<KAND_MIN||mPo<cilM/2?"var(--bad)":mPo<cilM?"var(--warn)":"var(--ok)";
+  const bez=kandPreskrt(k), lzePreskrt=bez&&bez>cil;
+  const poz=[];
+  if(k.cpu_shoda==="ekvivalent")poz.push("≈ CPU");
+  if(k.priplatek_ram)poz.push(`mají ${esc(k.jejich_ram)} GB RAM — naše cena srovnaná příplatkem ${kc(k.priplatek_ram)}`);
+  if(k.priplatek_ram_jejich)poz.push(`mají jen ${esc(k.jejich_ram)} GB RAM — k jejich ceně přičten náš příplatek ${kc(k.priplatek_ram_jejich)}`);
+  if(Number(k.nase_cena)!==nase)poz.push(`naše cena se od obnovy dat změnila (bylo ${kc(k.nase_cena)})`);
+  const drzi=s.drzena!=null&&Number(s.drzena)===cil;
+  return `<tr${hotovo?' style="opacity:.55"':""}>
+    <td><strong>${esc(k.kod)}</strong> ${esc(s.nazev)}</td>
+    <td class="r num">${kc(nase)}</td>
+    <td class="r num" style="font-weight:700">${kc(cil)}</td>
+    <td class="r num">${hotovo?"hotovo":"−"+kc(sleva)}</td>
+    <td>${esc(jm)} ${trhUrlOk(k.url)?`<a href="${esc(k.url)}" target="_blank" rel="noopener noreferrer">${kc(k.jejich_cena)}</a>`:kc(k.jejich_cena)}
+      ${poz.length?`<div class="muted" style="font-size:11px">${poz.join(" · ")}</div>`:""}</td>
+    <td class="r num" title="Cílová marže sestavy ${kc(cilM)}">${kc(mTed)}</td>
+    <td class="r num" style="font-weight:700;color:${tr}">${kc(mPo)}</td>
+    <td class="r num">${lzePreskrt?kc(bez):`<span class="muted" title="Nejnižší cena za 30 dní není vyšší než cílová — sleva se ohlásit nedá, jen zlevnit">—</span>`}</td>
+    <td class="r">${hotovo?"":drzi?`<span class="trhTyp stejne">držím</span>`
+      :`<button class="btn btn-sm" data-kanddrz="${esc(k.kod)}" title="Nastaví drženou cenu na cílovou${lzePreskrt?" a přeškrtnutou na "+kc(bez):""}. Na e-shop pak přes Stáhnout vše pro Shoptet ↓.">Držet cílovou</button>`}</td>
+  </tr>`;
+}
+function renderKand(){
+  const b=$("#kandBody"); if(!b)return;
+  const st=$("#kandStav");
+  if(!TRH){b.innerHTML=`<tr><td colspan="9" class="muted" style="padding:18px;text-align:center">${esc(TRH_CHYBA||(cloudOk()?"Načítám data trhu…":"Nejdřív vyplň repozitář a token v Nastavení"))}</td></tr>`;
+    if(st)st.textContent="";return}
+  const K=Array.isArray(TRH.akt.kandidati)?TRH.akt.kandidati:[];
+  if(st)st.innerHTML=`stav ${esc(trhKdy())}${trhStary()?` <span style="color:var(--bad)">· starší než 2 dny</span>`:""} · ${K.length} kandidátů`;
+  b.innerHTML=K.length?K.map(kandRadek).join("")
+    :`<tr><td colspan="9" class="muted" style="padding:18px;text-align:center">Žádný kandidát — nikde nejsme dráž, než je potřeba.</td></tr>`;
+}
+function kandDrzet(kod){
+  const k=TRH&&(TRH.akt.kandidati||[]).find(x=>String(x.kod)===String(kod));
+  const s=kandSestava(kod); if(!k||!s)return;
+  const cil=Number(k.cilova_cena), bez=kandPreskrt(k);
+  const naEshopu=(s.excel!=null&&s.excel!=="")?Number(s.excel):null;
+  /* Stejná pravidla jako Držet cenu na kartě: přeškrtnout jen když jdeme pod
+     cenu, která na e-shopu opravdu je, a jen z ceny vyšší než slevová. */
+  const preskrt=bez&&bez>cil&&naEshopu!=null&&cil<naEshopu?bez:null;
+  const nakB=kandNakupBez(s), mPo=bezDph(cil)-nakB;
+  if(!confirm(`${s.nazev}
+
+Držet cenu ${kc(cil)}`+(preskrt?` s přeškrtnutou ${kc(preskrt)}`:` bez přeškrtnutí`)
+    +`.
+Marže po slevě ${kc(mPo)} bez DPH.
+
+Ostatní varianty se posunou o stejný rozdíl. Na e-shop to pošleš přes Stáhnout vše pro Shoptet ↓.`))return;
+  s.drzena=cil; s.drzenaBezna=preskrt;
+  renderSest(); renderKand(); persist();
+  toast(s.drzena==null?"Cílová cena je rovná výpočtu — není co držet":`Držím ${kc(cil)}${preskrt?" z "+kc(preskrt):""}`);
 }
 function buildCard(s){
   if(s&&s.set)return buildSetCard(s);
@@ -1926,7 +2017,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=291;
+const VERZE=292;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7236,7 +7327,7 @@ function osvezKrizky(){
     if(inp)w.classList.toggle("ma",!!inp.value);
   }
 }
-function renderAll(){osvezKrizky();renderPripravene();renderKomp();renderSest();renderSur();renderNakupy();renderRekl();renderNab();renderEssox();renderSklad();renderNast();renderOdpisStav();renderCloud();popisTydnu();renderHistorie();persist()}
+function renderAll(){osvezKrizky();renderPripravene();renderKomp();renderSest();renderKand();renderSur();renderNakupy();renderRekl();renderNab();renderEssox();renderSklad();renderNast();renderOdpisStav();renderCloud();popisTydnu();renderHistorie();persist()}
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),1900)}
 
@@ -7610,7 +7701,9 @@ document.addEventListener("click",e=>{
   if(sb){specifikace(sb.dataset.spec);return;}
   const tb=e.target.closest("[data-trh]");
   if(tb){e.preventDefault();trhDetail(tb.dataset.trh);return;}
-  if(e.target.closest("#trhObnov")){TRH_CHYBA="";trhNacti(true);return;}
+  if(e.target.closest("#trhObnov")||e.target.closest("#kandObnov")){TRH_CHYBA="";trhNacti(true);return;}
+  const kd=e.target.closest("[data-kanddrz]");
+  if(kd){kandDrzet(kd.dataset.kanddrz);return;}
   const mb=e.target.closest("[data-modely]");
   if(mb){otevriModely(mb.dataset.modely);return;}
   const hb=e.target.closest("[data-hist]");
