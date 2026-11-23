@@ -151,6 +151,7 @@ tr.unused td{background:#FEFCFB}
 .htrh i{font-style:normal;font-family:var(--mono);font-weight:700;margin-left:4px}
 .htrh.draz i{color:var(--bad)} .htrh.levn i{color:var(--ok)} .htrh.rovno i{color:var(--ink-3)}
 .htrh.srov{border-style:dashed} .htrh.nic{opacity:.5}
+.htrh .tz{font-size:10.5px;color:#59636E;margin-left:3px}
 .trhTyp{font-size:10.5px;font-weight:700;border-radius:4px;padding:0 5px;white-space:nowrap}
 .trhTyp.stejne{background:#E3F4E8;color:#1E6B3A} .trhTyp.srovnatelne{background:#FFF3D6;color:#8A5A00}
 .trhTyp.rucne{background:#E6EEFB;color:#2C4C86} .trhTyp.gpu,.trhTyp.zadny{background:#EEF0F2;color:#59636E}
@@ -1668,35 +1669,21 @@ function buildSetCard(s){
       </div></div>`:""}
     </div>`;
 }
-/* ======== TRH — ceny stejné sestavy ve dvou obchodech (v290, issue #151) ========
-   Data chystá Claude Code na i9 do privátního repa: soubor se spárovanými
-   sestavami a denní snímek všech produktů obou obchodů (obnova denně ráno).
+/* ======== TRH — ceny stejné sestavy ve dvou obchodech (v291, issue #151) ========
+   Data i PÁROVÁNÍ chystá Claude Code na i9 (střižna, `_PIPELINE/konkurence.py`)
+   do privátního repa, denně ráno. Kalkulačka jen zobrazuje — skupiny procesorů,
+   další obchody a jiné úpravy párování se zadávají v issue #151, ne tady.
    Obchody jsou v kódu JEN pod klíči k1/k2 — názvy, adresy a nabídky přicházejí
    za běhu z dat. Do tohohle souboru je nikdy nepiš (veřejné repo, #102).
 
-   Párování pro každý obchod zvlášť, první, co platí:
-   1. ruční — Lukáš vybral konkrétní nabídku nebo „nic srovnatelného“
-      (D.trh.par[hlavniKod][k1|k2] = adresa nabídky nebo "x"),
-   2. stejné — stejná grafika (model + VRAM) a stejný procesor,
-   3. srovnatelné — stejná grafika a procesor ze stejné skupiny (trhCpuTrida),
-   4. jinak nic; nabídky se stejnou grafikou jsou jen v detailu k ručnímu výběru.
-   Sety s monitorem (obchod je má v seznamu PC) se s PC nepárují.
-   Bere se nejlevnější kus skladem, vyprodaný jen když jiný není.
-   Porovnává se s cenou, kterou má sestava na e-shopu (držená, jinak poslední
-   import), RAM a SSD se nepárují — jsou vidět v detailu. */
+   Položka konkurence: cpu_shoda (presne | ekvivalent = procesor stejné třídy),
+   rozdil = jejich cena − naše srovnatelná (záporné = jsou levnější),
+   u vyšší RAM nase_cena_stejna_ram + priplatek_ram (naše s příplatkem na
+   stejnou RAM). Rozdíl se počítá z naší ceny v době obnovy dat; když se naše
+   cena na e-shopu mezitím změnila (sleva), kalkulačka ho přepočte stejným
+   vzorcem z dnešní ceny. */
 const TRH_REPO_SOUBOR="konkurence/aktualni.json";
-const TRH_REPO_DEN=d=>`konkurence/historie/${d}.json`;
 let TRH=null, TRH_BEZI=false, TRH_CHYBA="";
-/* Skupiny procesorů, které se počítají za srovnatelné: stejný čip, liší se jen
-   integrovanou grafikou (F) nebo o 100–200 MHz. Intel: přípona F se ignoruje. */
-const TRH_CPU_SKUPINY={"Ryzen 5 5500F":"Ryzen 5 5500","Ryzen 5 5600X":"Ryzen 5 5600",
-  "Ryzen 5 7500F":"Ryzen 5 7600","Ryzen 5 9600":"Ryzen 5 9600X"};
-function trhCpuTrida(n){
-  n=String(n||"").trim(); if(!n)return "";
-  if(TRH_CPU_SKUPINY[n])return TRH_CPU_SKUPINY[n];
-  if(/^(i[3579]-|Ultra [579] )/.test(n))return n.replace(/F$/,"");
-  return n;
-}
 async function trhCti(cesta){
   const r=await ghFetch(`https://api.github.com/repos/${D.cloud.repo}/contents/${cesta}`,
     {headers:{"Accept":"application/vnd.github.raw+json"}});
@@ -1710,21 +1697,10 @@ async function trhNacti(rucne){
   try{
     const akt=await trhCti(TRH_REPO_SOUBOR);
     if(!akt||!akt.sestavy){TRH_CHYBA="Soubor trhu v repozitáři není";if(rucne)toast(TRH_CHYBA);return}
-    let den=null;
-    try{den=await trhCti(TRH_REPO_DEN(String(akt.cas||"").slice(0,10)))}catch(e){}
-    TRH={akt,den,produkty:trhProdukty(akt,den)};
+    TRH={akt}; TRH_CHYBA="";
     if(rucne)toast("Trh načten — stav "+trhKdy());
   }catch(e){TRH_CHYBA="Trh se nepodařilo načíst: "+e.message;if(rucne)toast(TRH_CHYBA)}
   finally{TRH_BEZI=false;renderSest();const b=$("#trhObnov");if(b)b.title="Ceny trhu — stav "+trhKdy()}
-}
-/* Plný seznam ze snímku dne; když chybí, aspoň nabídky přiložené k sestavám. */
-function trhProdukty(akt,den){
-  if(den&&Array.isArray(den.produkty))return den.produkty;
-  const m=new Map();
-  for(const[h,s]of Object.entries(akt.sestavy||{}))for(const typ of ["stejne","stejna_gpu"])
-    for(const[k,L]of Object.entries(s[typ]||{}))for(const p of L||[]){
-      const x=Object.assign({obchod:k},p); if(x.url&&!m.has(x.url))m.set(x.url,x)}
-  return [...m.values()];
 }
 function trhKdy(){
   const c=TRH&&TRH.akt&&TRH.akt.cas; if(!c)return "neznámý";
@@ -1736,8 +1712,9 @@ function trhStary(){
 }
 const trhObchody=()=>Object.entries((TRH&&TRH.akt&&TRH.akt.obchody)||{});
 const trhSkladem=p=>/skladem/i.test(p.dostupnost||"")&&!/vyprod|out of stock|není/i.test(p.dostupnost||"");
-const trhJeSet=p=>/\bset\b/i.test(p.nazev||"");
 const trhUrlOk=u=>/^https:\/\/[^\s"'<>]+$/.test(String(u||""));
+const trhCislo=x=>Math.round(Number(x)||0).toLocaleString("cs-CZ");
+const trhGb=x=>!x?"?":Number(x)>=1000?(Number(x)/1000).toLocaleString("cs-CZ")+" TB":x+" GB";
 /* Cena, kterou zákazník u nás vidí na e-shopu (základní varianta). */
 function trhNase(s){
   if(s.drzena!=null)return Number(s.drzena);
@@ -1748,111 +1725,83 @@ function trhInfo(s){
   const h=s&&s.hlavniKod; if(!TRH||!h)return null;
   return (TRH.akt.sestavy||{})[h]||null;
 }
-/* Všechny nabídky obchodu se stejnou grafikou (model + VRAM), bez setů. */
-function trhKandidati(info,k){
-  return (TRH.produkty||[]).filter(p=>p.obchod===k&&!trhJeSet(p)&&p.gpu===info.gpu
-    &&String(p.vram??"")===String(info.vram??""))
-    .sort((a,b)=>(trhSkladem(b)-trhSkladem(a))||(a.cena-b.cena));
+/* Rozdíl jejich − naše; s příplatkem na stejnou RAM, když ho data mají. */
+function trhRozdil(s,info,p){
+  const nase=trhNase(s), pr=Number(p.priplatek_ram)||0;
+  const zive=Number(info.nase_cena)!==nase||p.rozdil==null;
+  const d=zive?Math.round(Number(p.cena)-(nase+pr)):Math.round(Number(p.rozdil));
+  return {d,zive,nasRam:pr?nase+pr:null,
+    tr:Math.abs(d)<300?"rovno":d<0?"draz":"levn",
+    txt:(d>0?"+":d<0?"−":"±")+trhCislo(Math.abs(d)),
+    slovy:d<0?`jsou o ${kc(-d)} levnější`:d>0?`jsou o ${kc(d)} dražší`:"stejně"};
 }
-const trhNejlevnejsi=L=>{const S=L.filter(trhSkladem);return (S.length?S:L).slice().sort((a,b)=>a.cena-b.cena)[0]||null};
-function trhPar(s,k){
-  const info=trhInfo(s); if(!info)return null;
-  const rucni=(((D.trh||{}).par||{})[s.hlavniKod]||{})[k];
-  const K=trhKandidati(info,k);
-  if(rucni==="x")return {typ:"zadny",info,K};
-  let zmizelo=false;
-  if(rucni){const p=(TRH.produkty||[]).find(x=>x.url===rucni&&x.obchod===k);
-    if(p)return {typ:"rucne",p,info,K}; zmizelo=true}
-  const st=trhNejlevnejsi(K.filter(p=>p.cpu&&p.cpu===info.cpu));
-  if(st)return {typ:"stejne",p:st,info,K,zmizelo};
-  const tr=trhCpuTrida(info.cpu);
-  const sr=trhNejlevnejsi(K.filter(p=>p.cpu&&trhCpuTrida(p.cpu)===tr));
-  if(sr)return {typ:"srovnatelne",p:sr,info,K,zmizelo};
-  return {typ:"gpu",info,K,zmizelo};
+const trhSsdJine=(info,p)=>info.ssd&&p.ssd&&Number(info.ssd)!==Number(p.ssd);
+/* Nejlevnější ze `stejne` (střižna je posílá seřazené, ale nespoléháme na to). */
+function trhNej(info,k){
+  const L=((info.stejne||{})[k]||[]).slice().sort((a,b)=>a.cena-b.cena);
+  return L[0]||null;
 }
-const TRH_TYP={stejne:"stejná sestava",srovnatelne:"srovnatelný procesor",rucne:"spárováno ručně",
-  gpu:"nic stejného",zadny:"nic srovnatelného (ručně)"};
-function trhRozdil(nase,jejich){
-  const d=Math.round(nase-jejich);
-  const tr=Math.abs(d)<300?"rovno":d>0?"draz":"levn";
-  const txt=(d>0?"+":d<0?"−":"±")+Math.abs(d).toLocaleString("cs-CZ");
-  return {d,tr,txt,slovy:d>0?`my o ${kc(d)} dráž`:d<0?`my o ${kc(-d)} levněji`:"stejně"};
+function trhPopis(s,info,p,jm){
+  const z=trhRozdil(s,info,p);
+  return `${jm}: ${p.nazev||""}\n${kc(p.cena)} · ${p.dostupnost||""} · ${p.cpu||"?"}, ${trhGb(p.ram)} RAM, ${trhGb(p.ssd)} SSD`
+    +(p.cpu_shoda==="ekvivalent"?`\n≈ procesor stejné třídy (náš ${info.cpu})`:"")
+    +(z.nasRam?`\nnaše s ${p.ram} GB: ${kc(z.nasRam)} (příplatek ${kc(p.priplatek_ram)})`:"")
+    +(trhSsdJine(info,p)?`\n⚠ SSD: oni ${trhGb(p.ssd)}, my ${trhGb(info.ssd)}`:"")
+    +`\n${z.slovy}`+(z.zive?" (přepočteno na naši dnešní cenu)":"");
 }
 function trhHlavicka(s){
-  if(s.set||!TRH||!trhInfo(s))return "";
-  const nase=trhNase(s);
+  if(s.set||!TRH)return "";
+  const info=trhInfo(s); if(!info)return "";
   return trhObchody().map(([k,jm])=>{
-    const r=trhPar(s,k); if(!r)return "";
-    if(!r.p)return `<button class="htrh nic" data-trh="${s.id}" title="${esc(jm)}: ${esc(TRH_TYP[r.typ])} — klikni pro ruční výběr">${esc(jm)} —</button>`;
-    const z=trhRozdil(nase,r.p.cena);
-    return `<button class="htrh ${z.tr}${r.typ==="srovnatelne"?" srov":""}" data-trh="${s.id}"
-      title="${esc(jm)}: ${esc(r.p.nazev||"")}\n${esc(TRH_TYP[r.typ])}${r.typ!=="stejne"?" ("+esc(r.p.cpu||"?")+")":""} · ${kc(r.p.cena)} · ${esc(r.p.dostupnost||"")}\n${z.slovy} (naše ${kc(nase)} na e-shopu)">${esc(jm)} <b>${Math.round(r.p.cena).toLocaleString("cs-CZ")}</b><i>${z.txt}</i></button>`;
+    const p=trhNej(info,k);
+    if(!p)return `<button class="htrh nic" data-trh="${s.id}" title="${esc(jm)}: nic se stejnou grafikou a procesorem">${esc(jm)} —</button>`;
+    const z=trhRozdil(s,info,p);
+    return `<button class="htrh ${z.tr}${p.cpu_shoda==="ekvivalent"?" srov":""}" data-trh="${s.id}" title="${esc(trhPopis(s,info,p,jm))}">${esc(jm)} <b>${trhCislo(p.cena)}</b><i>${z.txt}</i>${p.cpu_shoda==="ekvivalent"?` <span class="tz">≈ CPU</span>`:""}${trhSsdJine(info,p)?` <span class="tz">⚠</span>`:""}${z.nasRam?` <span class="tz">naše s ${esc(p.ram)} GB: ${trhCislo(z.nasRam)}</span>`:""}</button>`;
   }).join("");
 }
-function trhRadek(p,nase,akce){
-  const z=trhRozdil(nase,p.cena);
+function trhRadek(s,info,p){
+  const z=trhRozdil(s,info,p);
   return `<td>${trhUrlOk(p.url)?`<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.nazev||"—")}</a>`:esc(p.nazev||"—")}</td>
-    <td>${esc(p.cpu||"?")}</td><td class="r num">${p.ram?esc(p.ram)+" GB":"?"}</td><td class="r num">${p.ssd?(p.ssd>=1000?esc(p.ssd/1000)+" TB":esc(p.ssd)+" GB"):"?"}</td>
+    <td>${esc(p.cpu||"?")}${p.cpu_shoda==="ekvivalent"?` <span class="trhTyp srovnatelne" title="Procesor stejné třídy">≈ CPU</span>`:""}</td>
+    <td class="r num">${esc(trhGb(p.ram))}${z.nasRam?`<div class="muted" style="font-size:10.5px">naše s ${esc(p.ram)} GB: ${kc(z.nasRam)}</div>`:""}</td>
+    <td class="r num">${trhSsdJine(info,p)?`<span title="Jiný disk než u nás (${esc(trhGb(info.ssd))})">⚠ </span>`:""}${esc(trhGb(p.ssd))}</td>
     <td class="r num" style="font-weight:700">${kc(p.cena)}${p.puvodne?`<div class="muted" style="font-weight:400;text-decoration:line-through">${kc(p.puvodne)}</div>`:""}</td>
     <td style="${trhSkladem(p)?"":"color:var(--bad)"}">${esc(p.dostupnost||"")}</td>
-    <td class="r num" style="color:${z.tr==="draz"?"var(--bad)":z.tr==="levn"?"var(--ok)":"var(--ink-3)"};font-weight:700" title="${esc(z.slovy)}">${z.txt}</td>
-    ${akce!=null?`<td class="r">${akce}</td>`:""}`;
+    <td class="r num" style="color:${z.tr==="draz"?"var(--bad)":z.tr==="levn"?"var(--ok)":"var(--ink-3)"};font-weight:700" title="${esc(z.slovy+(z.zive?" (přepočteno na naši dnešní cenu)":""))}">${z.txt}</td>`;
 }
-function trhNaseSlozeni(s){
-  return ["RAM","SSD"].map(x=>{const i=s.vyber&&s.vyber[x];const k=i?najdiKomp(i):null;return k?k.nazev:null}).filter(Boolean).join(" · ");
-}
+const TRH_HLAV=`<th>Nabídka</th><th>CPU</th><th class="r">RAM</th><th class="r">SSD</th><th class="r">Cena</th><th>Dostupnost</th><th class="r" title="Jejich cena minus naše srovnatelná. Mínus = jsou levnější.">Rozdíl</th>`;
 function trhSekce(s){
   if(s.set)return "";
   if(!TRH){return TRH_CHYBA?`<div class="vars"><div style="padding:6px 12px;font-size:11.5px;color:var(--ink-3)">Trh: ${esc(TRH_CHYBA)}</div></div>`:""}
   const info=trhInfo(s);
   if(!info)return `<div class="vars"><div style="padding:6px 12px;font-size:11.5px;color:var(--ink-3)">Trh: sestava${s.hlavniKod?" "+esc(s.hlavniKod):""} v datech trhu není${s.hlavniKod?" (přibude při další obnově)":" — nemá kód"}.</div></div>`;
-  const nase=trhNase(s);
-  const rad=trhObchody().map(([k,jm])=>{const r=trhPar(s,k);
-    const typ=`<span class="trhTyp ${r.typ}">${esc(TRH_TYP[r.typ])}</span>${r.zmizelo?` <span class="trhTyp zadny" title="Ručně vybraná nabídka v posledním stavu není">ruční zmizela</span>`:""}`;
-    return `<tr><td style="white-space:nowrap"><strong>${esc(jm)}</strong><div>${typ}</div></td>
-      ${r.p?trhRadek(r.p,nase,null):`<td colspan="7" class="muted">${r.K.length?r.K.length+" nabídek se stejnou grafikou, žádná se stejným ani srovnatelným procesorem":"žádná nabídka se stejnou grafikou"}</td>`}
-      <td class="r"><button class="btn btn-sm" data-trh="${s.id}">Vybrat…</button></td></tr>`}).join("");
+  const rad=trhObchody().map(([k,jm])=>{const p=trhNej(info,k);
+    return `<tr><td style="white-space:nowrap"><strong>${esc(jm)}</strong></td>
+      ${p?trhRadek(s,info,p):`<td colspan="7" class="muted">nic se stejnou grafikou a procesorem${((info.stejna_gpu||{})[k]||[]).length?" — se stejnou grafikou v detailu":""}</td>`}</tr>`}).join("");
   return `<div class="vars"><div style="padding:7px 12px 3px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:700">
       Trh — stav ${esc(trhKdy())}${trhStary()?` <span style="color:var(--bad)">· starší než 2 dny</span>`:""}
-      <span style="text-transform:none;letter-spacing:0;font-weight:400"> · naše ${kc(nase)} na e-shopu · ${esc(trhNaseSlozeni(s))}</span></div>
-    <div class="tbl"><table><thead><tr><th style="width:150px">Obchod</th><th>Nabídka</th><th>CPU</th><th class="r">RAM</th><th class="r">SSD</th><th class="r">Cena</th><th>Dostupnost</th><th class="r">My</th><th></th></tr></thead>
+      <span style="text-transform:none;letter-spacing:0;font-weight:400"> · naše ${kc(trhNase(s))} na e-shopu · ${esc(trhGb(info.ram))} RAM · ${esc(trhGb(info.ssd))} SSD ·
+      <a href="#" data-trh="${s.id}">detail</a></span></div>
+    <div class="tbl"><table><thead><tr><th style="width:110px">Obchod</th>${TRH_HLAV}</tr></thead>
     <tbody>${rad}</tbody></table></div></div>`;
 }
-let trhOtevrena=null;
 function trhDetail(sid){
   const s=D.sestavy.find(x=>x.id===sid); if(!s)return;
   if(!TRH){toast(TRH_CHYBA||"Trh se ještě načítá");return}
   const info=trhInfo(s); if(!info){toast("Sestava v datech trhu není");return}
-  trhOtevrena=sid;
-  const nase=trhNase(s), tr=trhCpuTrida(info.cpu);
-  $("#mTitle").textContent=(s.kod?s.kod.split("/")[0]+" · ":"")+s.nazev+" — trh";
-  $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Naše cena na e-shopu <strong>${kc(nase)}</strong> · ${esc(info.cpu||"?")} · ${esc(info.gpu||"?")} ${esc(info.vram||"")} GB · ${esc(trhNaseSlozeni(s))}.
-      Stav trhu ${esc(trhKdy())}. <strong>=</strong> stejný procesor, <strong>≈</strong> srovnatelný. Sloupec <em>My</em>: plus = jsme dráž.</p>`
+  const tab=(L,sedy)=>L.length?`<div class="tbl"><table><thead><tr>${TRH_HLAV}</tr></thead><tbody>${
+    L.slice().sort((a,b)=>a.cena-b.cena).map(p=>`<tr${sedy?' style="opacity:.75"':""}>${trhRadek(s,info,p)}</tr>`).join("")}</tbody></table></div>`:"";
+  $("#mTitle").textContent=(s.hlavniKod?s.hlavniKod+" · ":"")+s.nazev+" — trh";
+  $("#mBody").innerHTML=`<p class="hint" style="margin:0 0 10px">Naše cena na e-shopu <strong>${kc(trhNase(s))}</strong> · ${esc(info.cpu||"?")} · ${esc(info.gpu||"?")} ${esc(info.vram||"")} GB · ${esc(trhGb(info.ram))} RAM · ${esc(trhGb(info.ssd))} SSD.
+      Stav trhu ${esc(trhKdy())}. Rozdíl = jejich cena − naše srovnatelná (mínus = jsou levnější). Párování dělá střižna — úpravy do issue #151.</p>`
     +trhObchody().map(([k,jm])=>{
-      const r=trhPar(s,k), vyb=r.p&&r.p.url;
-      const rucni=(((D.trh||{}).par||{})[s.hlavniKod]||{})[k];
-      const rows=r.K.map(p=>{
-        const zn=p.cpu===info.cpu?"=":(p.cpu&&trhCpuTrida(p.cpu)===tr)?"≈":"";
-        const je=vyb&&p.url===vyb;
-        return `<tr${je?' style="background:#EAF6EE"':""}><td class="r" style="font-weight:800;width:18px">${zn}</td>${trhRadek(p,nase,
-          je?`<span class="trhTyp ${r.typ}">${r.typ==="rucne"?"vybráno":"automaticky"}</span>`
-            :`<button class="btn btn-sm" data-trhpar="${s.id}" data-k="${esc(k)}" data-v="${esc(p.url||"")}">Spárovat</button>`)}</tr>`}).join("");
-      return `<h3 style="margin:14px 0 6px">${esc(jm)} <span class="trhTyp ${r.typ}">${esc(TRH_TYP[r.typ])}</span>
-          ${rucni?`<button class="btn btn-sm" data-trhpar="${s.id}" data-k="${esc(k)}" data-v="">Vrátit automatické párování</button>`:""}
-          ${rucni!=="x"?`<button class="btn btn-sm" data-trhpar="${s.id}" data-k="${esc(k)}" data-v="x" title="U tohohle obchodu se nic srovnatelného neprodává">Nic srovnatelného</button>`:""}</h3>
-        ${rows?`<div class="tbl"><table><thead><tr><th></th><th>Nabídka se stejnou grafikou</th><th>CPU</th><th class="r">RAM</th><th class="r">SSD</th><th class="r">Cena</th><th>Dostupnost</th><th class="r">My</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
-          :`<p class="muted" style="margin:0">Žádná nabídka se stejnou grafikou.</p>`}`}).join("")
+      const st=(info.stejne||{})[k]||[], sg=(info.stejna_gpu||{})[k]||[];
+      return `<h3 style="margin:14px 0 6px">${esc(jm)}</h3>`
+        +(st.length?tab(st,false):`<p class="muted" style="margin:0 0 6px">Nic se stejnou grafikou a procesorem.</p>`)
+        +(sg.length?`<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:700;margin:8px 0 4px">Stejná grafika, jiný procesor — jen orientačně</div>${tab(sg,true)}`:"");
+    }).join("")
     +`<div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end"><button class="btn btn-sm btn-primary" id="trhZavri">Zavřít</button></div>`;
   modalKomp=null; $("#modal").hidden=false;
-}
-function trhSparuj(sid,k,v){
-  const s=D.sestavy.find(x=>x.id===sid); if(!s||!s.hlavniKod||!/^k\d+$/.test(k))return;
-  D.trh=D.trh||{}; D.trh.par=D.trh.par||{};
-  const m=D.trh.par[s.hlavniKod]=D.trh.par[s.hlavniKod]||{};
-  if(v)m[k]=v; else delete m[k];
-  if(!Object.keys(m).length)delete D.trh.par[s.hlavniKod];
-  persist(); renderSest();
-  if(trhOtevrena===sid&&!$("#modal").hidden)trhDetail(sid);
 }
 function buildCard(s){
   if(s&&s.set)return buildSetCard(s);
@@ -1977,7 +1926,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=290;
+const VERZE=291;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -7660,9 +7609,7 @@ document.addEventListener("click",e=>{
   const sb=e.target.closest("[data-spec]");
   if(sb){specifikace(sb.dataset.spec);return;}
   const tb=e.target.closest("[data-trh]");
-  if(tb){trhDetail(tb.dataset.trh);return;}
-  const tp=e.target.closest("[data-trhpar]");
-  if(tp){trhSparuj(tp.dataset.trhpar,tp.dataset.k,tp.dataset.v);return;}
+  if(tb){e.preventDefault();trhDetail(tb.dataset.trh);return;}
   if(e.target.closest("#trhObnov")){TRH_CHYBA="";trhNacti(true);return;}
   const mb=e.target.closest("[data-modely]");
   if(mb){otevriModely(mb.dataset.modely);return;}
@@ -8214,7 +8161,7 @@ document.addEventListener("click",e=>{
       +"\n\nVrátit to nejde."))return;
     D.nakupy=D.nakupy.filter(x=>x.id!==t.dataset.delnk);renderNakupy();persist()}
   if(t.id==="specZavri"){$("#modal").hidden=true}
-  if(t.id==="trhZavri"){$("#modal").hidden=true;trhOtevrena=null}
+  if(t.id==="trhZavri"){$("#modal").hidden=true}
   if(t.id==="specKopie"){navigator.clipboard.writeText(specText).then(()=>toast("Zkopírováno"),()=>toast("Kopírování se nezdařilo"))}
   if(t.id==="skRevize"){otevriRevizi();return}
   if(t.id==="revZrus"){$("#modal").hidden=true;return}
