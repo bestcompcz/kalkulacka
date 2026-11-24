@@ -2017,7 +2017,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=292;
+const VERZE=293;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -8637,7 +8637,7 @@ function esParseFakturyXml(txt){
       celkem+=(p?esNum(p.textContent):0)+(v?esNum(v.textContent):0)}
     const ad=el.getElementsByTagName("typ:address")[0];
     const nm=ad?ad.getElementsByTagName("typ:name")[0]:null, fm=ad?ad.getElementsByTagName("typ:company")[0]:null;
-    out.push({cislo:t("typ:numberRequested"),datum:t("inv:date"),
+    out.push({cislo:t("typ:numberRequested"),datum:t("inv:date"),vs:t("inv:symVar").replace(/^0+/,""),
       jmeno:nm?(nm.textContent||"").trim():"",firma:fm?(fm.textContent||"").trim():"",
       celkem:Math.round(celkem*100)/100});
   }
@@ -8653,6 +8653,7 @@ function esParseFakturyCsv(txt){
   for(let i=hi+1;i<rows.length;i++){
     const r=rows[i],kod=String(r[ix.invoiceCode]||"").trim();if(!kod)continue;
     if(!m.has(kod))m.set(kod,{cislo:kod,datum:esDatumCz(r[ix.date]),
+      vs:String(r[ix.variableSymbol??ix.orderCode]??"").trim().replace(/^0+/,""),
       jmeno:(r[ix.billFullName]||"").trim(),firma:(r[ix.billCompany]||"").trim(),celkem:0});
     m.get(kod).celkem+=esNum(r[ix.itemTotalPriceWithVat]);
   }
@@ -8679,7 +8680,7 @@ function esNajdiFakturu(s,faktury){
   for(const f of faktury){const v=esSkore(s,f);
     if(v>a){b=a;a=v;nej=f} else if(v>b)b=v}
   if(!nej||a<4)return null;
-  return {faktura:nej.cislo,fakturaCastka:nej.celkem,jistota:(a<6||a-b<2)?"kontrola":"jista"}}
+  return {faktura:nej.cislo,fakturaCastka:nej.celkem,vsObj:nej.vs||"",jistota:(a<6||a-b<2)?"kontrola":"jista"}}
 
 /* --------- zpracování nahraných souborů do náhledu --------- */
 function esZpracuj(){
@@ -8698,23 +8699,33 @@ function esZpracuj(){
     /* K nerealizované smlouvě žádná faktura nepatří. Dohledanou automaticky
        zahodíme, ruční zápis necháme — ten je Lukášovo rozhodnutí. */
     if(esNerealizovana(s)){
-      if(s.faktura&&s.jistota!=="rucne"){s.faktura="";s.fakturaCastka=0;s.jistota="";s._novaFaktura=false}
+      if(s.faktura&&s.jistota!=="rucne"){s.faktura="";s.fakturaCastka=0;s.jistota="";s.vsObj="";s._novaFaktura=false}
       continue;
     }
-    if(s.faktura)continue;
+    /* VS faktury (= číslo objednávky) doplníme i k faktuře přiřazené dřív nebo ručně */
+    if(s.faktura){
+      if(!s.vsObj){const f=faktury.find(x=>x.cislo===s.faktura);if(f&&f.vs)s.vsObj=f.vs}
+      continue}
     const f=esNajdiFakturu(s,faktury);
     if(f)Object.assign(s,f,{_novaFaktura:true});
   }
   const pref=new Set(["4006"]);
   for(const s of mapa.values())if(String(s.vs).length===10)pref.add(String(s.vs).slice(0,4));
 
+  /* Přímou platbu zákazník často pošle s VS objednávky (= VS faktury), ne s číslem
+     smlouvy — 10/2026: 10 000 Kč k faktuře 20260960 přišlo s VS 20261297. Platba
+     s VS objednávky se proto přiřadí ke smlouvě, která má přímou platbu a tuhle
+     fakturu. VS objednávky mají v mapě jen essoxové smlouvy, ostatní objednávky
+     se tím nepletou. */
+  const poObj=new Map();
+  for(const s of mapa.values())if(s.vsObj&&Number(s.primaPlatba)>0&&!esNerealizovana(s))poObj.set(String(s.vsObj),s);
   /* odchozí vratky odcházejí bez VS — dohledáme je podle protiúčtu a částky */
   const vratky=new Map();
   for(const t of banka){
     if(t.castka>=0||t.vs||!t.protiucet)continue;
     const zdroj=banka.find(x=>x.castka===-t.castka&&x.protiucet===t.protiucet&&
-      esSmlouvaVs(x.vs,pref)&&x.datum&&x.datum<=t.datum&&esDnu(x.datum,t.datum)<=90);
-    if(zdroj)vratky.set(t.id,zdroj.vs);
+      (esSmlouvaVs(x.vs,pref)||poObj.has(x.vs))&&x.datum&&x.datum<=t.datum&&esDnu(x.datum,t.datum)<=90);
+    if(zdroj)vratky.set(t.id,poObj.has(zdroj.vs)?poObj.get(zdroj.vs).vs:zdroj.vs);
   }
   /* čekající platby z minula dostanou ještě jednu šanci */
   const zdroje=[...(D.essoxCekajici||[]).map(x=>({...x,_cekal:true})),...banka];
@@ -8722,7 +8733,8 @@ function esZpracuj(){
   for(const t of zdroje){
     if(videne.has(t.id))continue; videne.add(t.id);
     const vs=t.vs||vratky.get(t.id)||"";
-    const s=vs?mapa.get(vs):null;
+    let s=vs?mapa.get(vs):null;
+    if(!s&&vs&&t.castka>0&&!esOdEssoxu(t))s=poObj.get(vs)||null;   // přímá platba s VS objednávky
     if(!s){
       if(esSmlouvaVs(vs,pref)||t._cekal)cekajici.push({...t,vs});
       else if(!t.vs&&esOdEssoxu(t))ostatni.push(t);
@@ -9069,7 +9081,7 @@ document.addEventListener("change",e=>{
   if(t.dataset.esfa!==undefined){
     const s=(D.essox||[]).find(x=>x.vs===t.dataset.esfa);
     /* ručně zadané číslo faktury nemá odkud vzít částku — vrátíme se k ceně ze smlouvy */
-    if(s){s.faktura=t.value.trim();s.fakturaCastka=0;s.jistota=s.faktura?"rucne":"";renderEssox();persist()}}
+    if(s){s.faktura=t.value.trim();s.fakturaCastka=0;s.vsObj="";s.jistota=s.faktura?"rucne":"";renderEssox();persist()}}
 });
 
 /* ================= start ================= */
