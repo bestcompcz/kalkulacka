@@ -2017,7 +2017,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=293;
+const VERZE=294;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -4408,11 +4408,17 @@ function dodavatelZOdkazu(url){
 /* Dodavatelé píší procesory jinak než náš ceník: "AMD Ryzen 7 5700" proti "R7 5700".
    Před porovnáním proto zápis sjednotíme. */
 function sjednotNazev(t){
-  return String(t||"")
+  let s=String(t||"")
     .replace(/\bamd\s+ryzen\s*(\d)\b/gi,"r$1")
     .replace(/\bryzen\s*(\d)\b/gi,"r$1")
     .replace(/\bintel\s+core\s+i(\d)\b/gi,"core i$1")
     .replace(/\bgeforce\s+/gi,"").replace(/\bradeon\s+/gi,"");
+  /* Mironet píše paměti bez generace: "Innovation IT 16GB 3200 MHz". Takty
+     2133–4000 MHz jsou DDR4 (DDR5 začíná na 4800), tak generaci doplníme, ať se
+     modul napáruje na "16 GB DDR4". U grafik se takt jádra neplete. */
+  if(/\d\s*gb\b/i.test(s)&&/\b(2133|2400|2666|2933|3000|3200|3466|3600|4000)\s*mhz\b/i.test(s)
+    &&!/ddr/i.test(s)&&!/\b(rtx|gtx|rx|arc)\b/i.test(s))s+=" DDR4";
+  return s;
 }
 /* Alza a spol. lepí před název produktu kategorii ("Operační paměť Patriot
    Viper Elite 5 16GB"). Do nákupu patří jen název produktu. Delší fráze musí
@@ -4509,7 +4515,7 @@ function komponentaZPopisu(txt){
   return nej;
 }
 /* Řádky, které nejsou zboží — dopravné, balné a poplatky. */
-const NENIZBOZI=/^(balné|balne|poštovné|postovne|doprava|dopravné|dobírka|dobirka|recykl|phe|poplatek|zaokrouhlen|služba|sluzba|sleva)/i;
+const NENIZBOZI=/^(balné|balne|poštovné|postovne|doprava|dopravné|doručení|doruceni|dobírka|dobirka|recykl|phe|poplatek|zaokrouhlen|služba|sluzba|sleva)/i;
 const SOUHRN=/^(celkem|mezisou|částka dph|castka dph|dph|k úhradě|k uhrade|částky jsou|castky jsou|základ|zaklad)/i;
 const cisloCZ=x=>Number(String(x).replace(/[\s\u00a0]/g,"").replace(/\.(?=\d{3}\b)/g,"").replace(",","."))||0;
 /* Tabulkový rozpis z faktury nebo objednávky, sloupce oddělené tabulátorem. */
@@ -4663,11 +4669,17 @@ function doDataSlovy(s){
   }
   return null;
 }
-function rozeberRadky(radky){
+/* Detail objednávky Mironetu (11/2026): pod názvem "Kód: 92472144", pak
+   "Objednáno: 9 ksRezervováno: 0 ksZrušeno: 0 ks" slepené do jednoho řádku a cena
+   ZA KUS, na konci "Celkem" / částka / "bez DPH …". Do v293 se to nerozpoznalo
+   jako řádkový rozpis a z celé objednávky vznikl nesmysl. */
+const MIRONET_OBJ=/Objedn[áa]no\s*:\s*\d+\s*ks\s*Rezervov[áa]no\s*:/i;
+function rozeberRadky(radky,miro){
   const cis=x=>Number(String(x).replace(/[\s\u00a0]/g,"").replace(",","."))||0;
   const meta={zaklad:null,dph:null,celkem:null,poplatky:0,poplatkyPopis:[]};
-  const out=[]; let cur=null;
-  const uloz=()=>{ if(cur&&cur.popis){
+  const out=[]; let cur=null, cekaSouhrn=null;
+  const uloz=()=>{ if(cur&&cur.zruseno){cur.ks=Math.max(0,(cur.ks||0)-cur.zruseno); if(!cur.ks)cur.popis=""}
+    if(cur&&cur.popis){
       /* surova = částka, jak ji e-shop u položky napsal. Drží se vedle ceny, aby
          přepínač "ceny jsou za kus" šel překlopit bez nového rozebrání textu —
          to by zahodilo ručně vepsaného dodavatele. jedn = je nesporně za kus. */
@@ -4678,7 +4690,7 @@ function rozeberRadky(radky){
       /* Většina e-shopů uvádí u položky celkovou částku, Mironet a Smarty cenu za kus. */
       const zaKus=jedn||(D.cenaZaKus||[]).includes(String(cur.dodavatel||dodavatelZOdkazu(cur.odkaz)||"").toLowerCase());
       const cena=surova==null?null:(zaKus||cur.ks<=1?surova:Math.round((surova/cur.ks)*100)/100);
-      if(cur.poplatek){ if(cena)meta.poplatky+=Math.round(cena*cur.ks*100)/100 }
+      if(cur.poplatek){ if(cena){meta.poplatky+=Math.round(cena*cur.ks*100)/100;meta.poplatkyPopis.push(cur.popis+" "+kc(cena*cur.ks))} }
       else if(cena!=null)out.push({popis:cur.popis,odkaz:cur.odkaz,ks:cur.ks,cena,datum:null,
         doruceni:cur.doruceni||null,surova,jedn});
     } cur=null };
@@ -4687,7 +4699,18 @@ function rozeberRadky(radky){
     if(!l)continue;
     const ms=l.match(/^(cena bez dph|celková cena s dph|celkova cena s dph|celkem vč\.? dph|celkem)\D*([\d\s\u00a0]+(?:[.,]\d+)?)/i);
     if(ms){const v=cis(ms[2]); if(v>0){ if(/bez dph/i.test(ms[1]))meta.zaklad=v; else meta.celkem=v } continue}
-    if(KOSIK_SOUHRN.test(l))continue;
+    /* "Celkem" bez čísla: částka na dalším řádku je součet objednávky, ne cena
+       poslední položky (do v293 se k ní přilepila a přebila její cenu). */
+    if(KOSIK_SOUHRN.test(l)){ if(cur){uloz();cekaSouhrn=/bez\s*dph/i.test(l)?"zaklad":"celkem"} continue }
+    const mbez=l.match(/^bez\s*DPH\s*:?\s*(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]/i);
+    if(mbez){uloz();meta.zaklad=cis(mbez[1]);cekaSouhrn=null;continue}
+    if(cekaSouhrn){const ms2=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]/i);
+      if(ms2){meta[cekaSouhrn]=cis(ms2[1]);cekaSouhrn=null;continue}}
+    if(/^k[óo]d(\s+zbo[žz][íi])?\s*:\s*\S+\s*$/i.test(l))continue;   // kód zboží pod názvem
+    if(miro){
+      const mo=l.match(/^objedn[áa]no\s*:\s*(\d+)\s*ks\s*$/i); if(mo){ if(cur)cur.ks=Number(mo[1]); continue }
+      const mz=l.match(/^zru[šs]eno\s*:\s*(\d+)\s*ks\s*$/i); if(mz){ if(cur)cur.zruseno=Number(mz[1]); continue }
+    }
     const mk=l.match(/^(\d+)\s*(?:ks|x)\b/i);
     if(mk){ if(cur)cur.ks=Number(mk[1])||1; continue }
     const mj=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc]\s*\/\s*ks/i);
@@ -4697,26 +4720,27 @@ function rozeberRadky(radky){
     /* Smarty tiskne u položky obě částky: "19 388 Kč" a pod ní "16 023 Kč bez DPH".
        Kdyby spadly do jednoho pole, vzala by se u víc kusů ta nižší jako celková. */
     const mc=l.match(/^(-?[\d\s\u00a0]+(?:[.,]\d+)?)\s*K[čc](\s*bez\s*DPH)?/i);
-    if(mc){ if(cur)(mc[2]?cur.cenyBez:cur.ceny).push(cis(mc[1])); continue }
+    if(mc){ if(cur){ if(miro&&!mc[2]&&cur.jednotkova==null)cur.jednotkova=cis(mc[1]);
+        else (mc[2]?cur.cenyBez:cur.ceny).push(cis(mc[1])) } continue }
     if(KOSIK_STAV.test(l)||KOSIK_STAV_OBJ.test(l))continue;
     /* Smarty uvádí u každé položky "Doručení 25.9. (pátek)". Je to údaj k položce,
        ne konec košíku — datum si zapamatujeme a řádek přeskočíme. */
-    const mdor=l.match(/^doru[čc]en[ií]\s+(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{4})?/i);
+    const mdor=miro?null:l.match(/^doru[čc]en[ií]\s+(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{4})?/i);
     if(mdor){ if(cur)cur.doruceni=doDataDne(mdor[1],mdor[2],mdor[3]); continue }
     /* Termín slovy. A pojistka: dokud položka nemá cenu, je "Doručení …" její údaj,
        ne konec košíku — jinak by se cena pod ním zahodila a položka vypadla. */
-    const mdorS=l.match(/^doru[čc]en[ií]\s*:?\s+(.+)$/i);
+    const mdorS=miro?null:l.match(/^doru[čc]en[ií]\s*:?\s+(.+)$/i);
     if(mdorS&&cur){
       const dd=doDataSlovy(mdorS[1]);
       if(dd)cur.doruceni=dd;
       if(dd||(!cur.ceny.length&&!(cur.cenyBez||[]).length&&cur.jednotkova==null))continue;
     }
-    if(KOSIK_KONEC.test(l)){uloz();continue}
+    if(!(miro&&/^doru[čc]en[ií]\s/i.test(l))&&KOSIK_KONEC.test(l)){uloz();continue}
     /* zbývá text — název položky, nebo poplatek typu doprava či sleva */
     const md=l.match(/^\[(.+?)\]\((https?:\/\/[^\s)]+)\)/);
     const popis=(md?md[1]:l).replace(/^[-–•*]\s*/,"").trim();
     if(!popis)continue;
-    uloz();
+    uloz(); cekaSouhrn=null;
     /* Mironet lepí počet kusů rovnou za odkaz: "…)30 ks". Vytáhneme ho z konce řádku. */
     let zbytek=md?l.slice(md[0].length):"";
     let ksRadek=null, cenaRadek=null;
@@ -4737,18 +4761,20 @@ function odhadniDodavatele(pol){
   return "";
 }
 function rozeberKosik(txt){
+  const miro=MIRONET_OBJ.test(String(txt||""));
+  if(miro)txt=String(txt).replace(/[ \t\u00a0]*(K[óo]d|Objedn[áa]no|Rezervov[áa]no|Zru[šs]eno)\s*:/gi,"\n$1:");
   const radky=String(txt||"").split(/\r?\n/).map(x=>x.replace(/[ \u00a0]+$/,""));
   const tab=rozeberTabulku(radky);
   /* Řádkový rozpis poznáme i tehdy, když je počet kusů přilepený za odkazem,
      jako to dělá Mironet ("…)30 ks"). */
-  const jeRadkovy=radky.some(l=>/^\s*\d+\s*ks\b/i.test(l))
+  const jeRadkovy=miro||radky.some(l=>/^\s*\d+\s*ks\b/i.test(l))
     ||radky.some(l=>/\]\(https?:\/\/[^\s)]+\)\s*\d+\s*(?:ks|x)\b/i.test(l));
-  const zdroj=tab.length?tab:(jeRadkovy?rozeberRadky(radky):rozeberVolnyText(txt));
+  const zdroj=tab.length?tab:(jeRadkovy?rozeberRadky(radky,miro):rozeberVolnyText(txt));
   const r=zdroj.map(x=>{
     /* Párujeme z původního textu, ukládáme název bez kategorie e-shopu. */
     const k=komponentaZPopisu(x.popis);
     return Object.assign({},x,{popis:bezKategorie(x.popis),komp:k?k.id:null,kompNazev:k?k.nazev:null,
-      dodavatel:x.dodavatel||dodavatelZOdkazu(x.odkaz)||odhadniDodavatele(zdroj)});
+      dodavatel:x.dodavatel||dodavatelZOdkazu(x.odkaz)||(miro?"mironet":"")||odhadniDodavatele(zdroj)});
   });
   r.meta=zdroj.meta;
   return r;
@@ -4848,14 +4874,21 @@ function zobrazKosikNahled(pol){
     ${(()=>{const M=pol.meta; if(!M||(!M.zaklad&&!M.celkem))return "";
       const polozky=pol.reduce((a,x)=>a+(x.ks||0)*(x.cena||0),0);
       const soucet=Math.round((polozky+M.poplatky)*100)/100;
-      const fakt=M.zaklad||M.celkem;
-      const sedi=Math.abs(soucet-fakt)<1;
+      /* Ceny s DPH (nezaškrtnuto) se porovnávají s celkem, ne se základem bez DPH —
+         Mironet uvádí obojí a do v293 se položky s DPH srovnávaly se základem. */
+      const fakt=kosikBezDph?(M.zaklad||M.celkem):(M.celkem||M.zaklad);
+      /* E-shop, který ukazuje cenu za kus zaokrouhlenou na koruny (Mironet), se
+         od součtu objednávky liší nejvýš o půl koruny na kus. */
+      const celeKc=pol.length&&pol.every(x=>x.cena!=null&&Math.abs(x.cena-Math.round(x.cena))<0.001);
+      const tol=celeKc?pol.reduce((a,x)=>a+(x.ks||0),0)*0.5+1:1;
+      const rozdil=Math.round((soucet-fakt)*100)/100;
+      const sedi=Math.abs(rozdil)<1||Math.abs(rozdil)<=tol;
       return `<div style="margin:10px 0 0;padding:9px 11px;border-radius:6px;
         background:${sedi?"#DDF3E6":"#FDE7E4"};font-size:12.5px">
         <strong>${sedi?"Kontrola proti faktuře sedí":"POZOR: součet nesedí s fakturou"}</strong><br>
         položky ${kc(polozky)}${M.poplatky?" + "+esc(M.poplatkyPopis.join(", ")):""} = <strong>${kc(soucet)}</strong>
         &nbsp;·&nbsp; faktura ${kc(fakt)}${M.dph?", DPH "+kc(M.dph)+", celkem "+kc(M.celkem||0):""}
-        ${sedi?"":"<br>Rozdíl "+kc(soucet-fakt)+" — projdi řádky, něco se nerozebralo správně."}</div>`;})()}
+        ${sedi?(Math.abs(rozdil)>=1?"<br>Rozdíl "+kc(rozdil)+" je zaokrouhlení cen za kus na koruny.":""):"<br>Rozdíl "+kc(rozdil)+" — projdi řádky, něco se nerozebralo správně."}</div>`;})()}
     <label class="row" style="gap:7px;margin:10px 0 0;cursor:pointer;padding:8px 10px;background:#FFF8E1;border-radius:6px">
       <input type="checkbox" id="kosikDph" ${kosikBezDph?"checked":""} style="width:auto">
       <span style="font-size:12.5px"><strong>Vložený text uvádí ceny bez DPH</strong>
