@@ -2044,7 +2044,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=295;
+const VERZE=296;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
@@ -2681,8 +2681,9 @@ function zobrazExportVse(){
         <td class="r num" style="color:${x.stara!==null&&x.nova>x.stara?"var(--bad)":"var(--ok)"}">${x.stara===null||x.nova==null?"—":(x.nova-x.stara>0?"+":"")+Math.round(x.nova-x.stara)}</td>
         <td class="r num">${x.sestav}</td></tr>`).join("")}
       </tbody></table></div>`
-      :PR.nove.length?""
+      :PR.nove.length||PR.sady.length?""
       :`<p style="margin:0;font-size:12.5px;color:var(--ok);font-weight:600">Příplatky se od posledního odeslání nezměnily.</p>`}
+    ${PR.znamo&&PR.sady.length?`<p style="margin:6px 0 0;font-size:12.5px;font-weight:600">Změnila se nabídka příplatků (zapnuté / vypnuté) u: ${esc(PR.sady.join(", "))} — pošle se celá sada.</p>`:""}
     ${PR.znamo&&PR.nove.length?`<p style="margin:6px 0 0;font-size:12.5px;font-weight:600">Nové produkty, které příplatky na e-shopu ještě nemají: ${esc(PR.nove.join(", "))} — pošle se celá sada.</p>`:""}
     ${H(3,"Kategorie — cenový level")}
     ${lvl.length?`<ul style="margin:0;padding-left:18px;font-size:12.5px">
@@ -6285,7 +6286,28 @@ function zmenyPriplatku(){
      porovnání cen nevidí. Pamatují se proto i kódy, kterým příplatky odešly (v275). */
   const ok=Array.isArray(D.priplatkyKody)?new Set(D.priplatkyKody):null;
   const nove=ok?kodyPriplatku().filter(k=>!ok.has(k)):[];
-  return {znamo:!!sn,radky,nove};
+  /* Vypnutý nebo zapnutý příplatek u sestavy (vyp) cenu nemění, takže ho
+     porovnání cen ani kódů nevidí a Stáhnout vše by příplatky neposlalo (v296,
+     27. 11. 2026: 763 bez 990 PRO). Pamatuje se proto i sada příplatků každého
+     kódu, jak odešla (D.priplatkySady). */
+  if(!D.priplatkySady){
+    D.priplatkySady=sadyPriplatku();
+    /* Jednorázově: u 763 se 990 PRO vypnulo až po posledním odeslání příplatků
+       (27. 11. 14:20), takže výchozí stav se u něj brát nesmí. */
+    for(const k of Object.keys(D.priplatkySady))if(k.split("/")[0]==="763")delete D.priplatkySady[k];
+  }
+  const cur=sadyPriplatku(), sady=[];
+  if(ok)for(const k of Object.keys(cur))if(ok.has(k)&&D.priplatkySady[k]!==cur[k])sady.push(k);
+  return {znamo:!!sn,radky,nove,sady};
+}
+/* Které příplatky dostane který kód — pro poznání vypnutého/zapnutého příplatku. */
+function sadyPriplatku(){
+  const m={};
+  for(const s of D.sestavy){
+    const ids=priplatkySestavy(s).filter(p=>!(s.vyp||{})[p.id]).map(p=>p.id).sort().join(",");
+    for(const k of (s.kod||"").split(",").map(x=>x.trim()).filter(Boolean))m[k]=ids;
+  }
+  return m;
 }
 /* Kódy produktů, které v souboru s příplatky dostanou aspoň jednu hodnotu. */
 function kodyPriplatku(){
@@ -6313,6 +6335,7 @@ function exportPriplatku(tichy){
       for(const k of kody)rows.push([k,pairProKod(k,s),...bunky]);
     }
     dl(`shoptet-priplatky-${dnes()}-${rows.length-1}variant.csv`,csv(rows),"text/csv");
+    D.priplatkySady=sadyPriplatku();
     if(!tichy)toast(rows.length-1+" řádků"+(bezKodu?"  ·  "+bezKodu+" sestav bez kódu vynecháno":""));
     return rows.length-1;
   }
@@ -8076,7 +8099,7 @@ document.addEventListener("click",e=>{
       csv([["code","pairCode","standardPrice"],...rowsB]),"text/csv");
     /* Příplatky jdou vždy celou sadou — posílají se, když se něco hnulo, když
        se ještě nikdy neposlaly, nebo když se přetlačuje celý katalog. */
-    const posliPr=!PR.znamo||PR.radky.length>0||PR.nove.length>0||vse;
+    const posliPr=!PR.znamo||PR.radky.length>0||PR.nove.length>0||PR.sady.length>0||vse;
     const nPr=posliPr?exportPriplatku(true):0;
     if(posliPr){D.priplatkyOdeslano=snapPriplatky(); D.priplatkyKody=kodyPriplatku()}
     let nKat=0;
