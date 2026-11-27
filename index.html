@@ -1115,6 +1115,33 @@ function initSety(d){
       const m=kk("727"); if(m&&!(Number(m.cenaEshop)>0)){m.cenaEshop=4900;m.cenaEshopKdy="2026-11-04"}
       d.setyFix1=1;
     }
+    /* 27. 11. 2026 (issue #168): produkt 763 = sestava 619 (RTX 5050, A520, 16 GB
+       DDR4, 1 TB, 400 W) s procesorem R5 5600 místo R5 5500. Lukáš ho založil
+       v Shoptetu jako kopii 619, takže tam visí příplatky „z R5 5500 na…" —
+       správné přijdou s nejbližším importem příplatků (kód 763 ještě nikdy
+       příplatky nedostal, D.priplatkyKody). Výměna CPU se nabízí stejně jako
+       u 619 (box → tower): 5700, 5700X a 5800X s towerem; varianty „vč. vodního
+       chlazení" z R5 5600 (5700X, 5800X, 5800X3D) se vypínají. Vodní AIO jde
+       dál přes Lepší chlazení CPU. pairCode a kategorie doplní Načíst ↑ z e-shopu,
+       excel = cena, kterou 763 na e-shopu má k 27. 11. Jednorázově. */
+    if(!d.sestava763&&Array.isArray(d.sestavy)&&d.komponenty){
+      const maKod=(x,kod)=>String(x.kod||"").split(",").map(y=>y.split("/")[0].trim()).includes(kod);
+      const b=d.sestavy.find(x=>x&&!x.set&&maKod(x,"619"));
+      const c56=(d.komponenty["CPU"]||[]).find(x=>x.nazev==="R5 5600");
+      const aio=(d.komponenty["Chladič"]||[]).find(x=>x.nazev==="Vodní AIO 240 Black");
+      if(!d.sestavy.some(x=>x&&maKod(x,"763"))&&b&&c56){
+        const n=JSON.parse(JSON.stringify(b));
+        n.id=uid(); n.nazev="R5 5600 + RTX 5050"; n.vyber.CPU=c56.id;
+        n.kod="763/NOR, 763/NOR2, 763/X3, 763/X4, 763/XR, 763/XR2";
+        n.hlavniKod="763"; n.zakladniKod="763/X3";
+        n.url="https://www.bestcomp.cz/herni-pc-rtx-5050-8gb-ryzen-5-5600-16gb-1tb-ssd-win11-bestcomp/";
+        n.pairCode=""; n.kategorie=null; n.excel=23900; n.drzena=null; n.drzenaBezna=null;
+        n.vyp={};
+        if(aio)for(const pr of d.priplatky||[])if(pr&&pr.from===c56.id&&pr.chlNa===aio.id)n.vyp[pr.id]=true;
+        const i=d.sestavy.indexOf(b); d.sestavy.splice(i+1,0,n);
+      }
+      if(b&&c56)d.sestava763=1;
+    }
     for(const s of d.sestavy||[])if(s&&s.set)zajistiSet(s);
     if(!Array.isArray(d.priplatkyKody)&&d.priplatkyOdeslano&&Array.isArray(d.sestavy)){
       d.priplatkyKody=d.sestavy.flatMap(s=>String(s.kod||"").split(",").map(x=>x.trim()).filter(Boolean)).filter(k=>k!=="S366");
@@ -2017,7 +2044,7 @@ function uklidDrzeni(){
    když mezitím uložilo jiné zařízení, GitHub změnu odmítne a nic se nepřepíše. */
 /* Číslo verze aplikace. Ukládá se do dat, aby starší kalkulačka poznala,
    že data uložila novější, a nepřepsala je zastaralým formátem. */
-const VERZE=294;
+const VERZE=295;
 const GH_TOKEN_KEY="bestcomp-gh-token";
 let cloudSha=null, cloudKdy=null, cloudZmena=false, cloudBezi=false;
 const ZARIZENI_KEY="bestcomp-zarizeni";
